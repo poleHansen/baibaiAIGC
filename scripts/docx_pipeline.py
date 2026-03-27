@@ -79,6 +79,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     extract_parser.add_argument("input", type=Path, help="Path to input .docx file")
 
+    extract_to_file_parser = subparsers.add_parser(
+        "extract-to-file", help="Extract plain text from a .docx file into a UTF-8 text file",
+    )
+    extract_to_file_parser.add_argument(
+        "input", type=Path, help="Path to input .docx file"
+    )
+    extract_to_file_parser.add_argument(
+        "output", type=Path, help="Path to output .txt file"
+    )
+
     build_parser = subparsers.add_parser(
         "build", help="Build a .docx file from a plain text file",
     )
@@ -90,6 +100,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "extract":
         text = read_docx_text(args.input)
         print(text)
+    elif args.command == "extract-to-file":
+        text = read_docx_text(args.input)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text, encoding="utf-8")
     elif args.command == "build":
         text = args.input.read_text(encoding="utf-8")
         blocks = _split_text_into_blocks(text)
