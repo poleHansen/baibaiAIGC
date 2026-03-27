@@ -67,6 +67,10 @@ class RoundRecord:
     input_path: str
     output_path: str
     score_total: Optional[int] = None
+    chunk_limit: Optional[int] = None
+    input_segment_count: Optional[int] = None
+    output_segment_count: Optional[int] = None
+    manifest_path: Optional[str] = None
     timestamp: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
@@ -122,6 +126,10 @@ def update_round(
     input_path: str,
     output_path: str,
     score_total: Optional[int] = None,
+    chunk_limit: Optional[int] = None,
+    input_segment_count: Optional[int] = None,
+    output_segment_count: Optional[int] = None,
+    manifest_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update (or create) the record for a single document round.
 
@@ -152,6 +160,10 @@ def update_round(
         input_path=input_path,
         output_path=output_path,
         score_total=score_total,
+        chunk_limit=chunk_limit,
+        input_segment_count=input_segment_count,
+        output_segment_count=output_segment_count,
+        manifest_path=manifest_path,
         timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
 
@@ -227,6 +239,29 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional checklist total score for this round.",
     )
+    update_parser.add_argument(
+        "--chunk-limit",
+        type=int,
+        default=None,
+        help="Optional per-chunk character limit used in this round.",
+    )
+    update_parser.add_argument(
+        "--input-segment-count",
+        type=int,
+        default=None,
+        help="Optional number of chunks produced from the input text.",
+    )
+    update_parser.add_argument(
+        "--output-segment-count",
+        type=int,
+        default=None,
+        help="Optional number of chunk outputs written back into the restored text.",
+    )
+    update_parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Optional path to the chunk manifest json for this round.",
+    )
 
     return parser
 
@@ -245,6 +280,10 @@ def main(argv: Optional[List[str]] = None) -> None:
             input_path=args.input_path,
             output_path=args.output_path,
             score_total=args.score_total,
+            chunk_limit=args.chunk_limit,
+            input_segment_count=args.input_segment_count,
+            output_segment_count=args.output_segment_count,
+            manifest_path=args.manifest_path,
         )
         text = json.dumps(doc_entry, ensure_ascii=False, indent=2, sort_keys=True)
         print(text)

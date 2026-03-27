@@ -1,1 +1,2 @@
 python-docx>=0.8.11
+# Script API mode uses Python stdlib urllib and does not add extra dependencies.

@@ -26,9 +26,12 @@ user-invocable: true
 - 在开始本轮改写之前，必须先读取“降 AIGC 记录”，根据当前文档已完成轮次自动选择本轮应使用的 prompt；如果记录中没有该文档，则默认本轮为第 1 轮，使用 `prompts/baibaiAIGC1.md`。
 - 在开始下一轮之前，必须先完成当前轮改写，不能提前综合后续轮次要求。
 - 不允许将三份提示词总结成一个混合提示后一次性处理，也不允许在一次 skill 调用中合并多轮。
+- 单轮内部也不允许将整篇论文一次性整体改写，必须先做自然分段再逐块处理。
 - 不得新增事实、数据、案例、文献、引文或实验结论。
 - 必须保留原文的专业术语、逻辑关系、编号结构、段落结构和关键结论。
 - 如果某一轮提示词与原文场景冲突，优先保留原文事实与论文语体，不要为了降 AIGC 牺牲准确性。
+- 分段规则必须满足：优先按原始段落切分；若单个段落超过 850 字，再按完整句子的自然断句位置继续切分；不得在句子、术语、编号或引用内容中间随意截断。
+- 每个处理块默认最多 850 字；逐块改写完成后，必须按原段落归属和原顺序还原，不能改变原有段落结构。
 
 ## 降 AIGC 记录
 
@@ -39,6 +42,7 @@ user-invocable: true
   - 已执行的轮次列表及其顺序（至少包含轮次编号 1/2/3）。
   - 每一轮使用的 prompt 文件路径（如 `prompts/baibaiAIGC1.md` 等）。
   - 每一轮生成的输出文件路径（通常位于 `finish/intermediate/` 或 `finish/`）。
+  - 每一轮采用的分段上限、分段数量，以及分段结构清单路径。
   - 可选：时间戳、执行环境等元信息。
 - 在每次调用本 skill、开始改写之前，必须先读取这份记录：
   - 如果当前文档不存在任何记录，则本次默认执行第 1 轮，使用 `prompts/baibaiAIGC1.md`。
@@ -63,6 +67,10 @@ user-invocable: true
         "prompt": "prompts/baibaiAIGC1.md",
         "input_path": "origin/毕业论文_原始_utf8.txt",
         "output_path": "finish/intermediate/毕业论文_原始_utf8_round1.txt",
+        "chunk_limit": 850,
+        "input_segment_count": 12,
+        "output_segment_count": 12,
+        "manifest_path": "finish/intermediate/毕业论文_原始_utf8_round1_manifest.json",
         "score_total": 38,
         "timestamp": "2026-03-27T10:01:23Z"
       }
@@ -78,6 +86,10 @@ user-invocable: true
   - `prompt`: 本轮使用的 prompt 文件路径。
   - `input_path`: 本轮输入文本文件路径（原始文件或上一轮输出）。
   - `output_path`: 本轮输出文本文件路径（通常在 `finish/intermediate/` 下）。
+  - `chunk_limit`: 本轮单块字符上限，默认 850。
+  - `input_segment_count`: 本轮输入文本被切成的块数。
+  - `output_segment_count`: 本轮输出文本回填时使用的块数。
+  - `manifest_path`: 本轮分段结构清单路径，用于按原段落结构还原。
   - `score_total`: 可选，本轮 checklist 总分。
   - `timestamp`: 可选，ISO 8601 格式时间戳，用于审计和排查。
 
@@ -104,6 +116,45 @@ user-invocable: true
 
 在实现本 skill 时，无论是通过脚本还是直接读写 JSON，都应遵守上面的记录结构和更新时机：每完成一轮降重，就立即写入或更新对应文档的 round 记录。
 
+### 分段处理脚本
+
+如果工作区中存在 `scripts/run_aigc_round.py`，则它负责脚本 API 模式下的“单轮内分段处理”；如果是在聊天框中触发本 skill，则优先复用 `scripts/skill_round_helper.py` 作为对话模式的编排入口，而不是在对话中把整篇论文一次性送入当前轮提示词，也不是错误要求用户补充脚本 API 配置。
+
+两类入口的职责应明确区分：
+
+- `scripts/skill_round_helper.py`：服务聊天框 skill 模式，负责根据 `finish/aigc_records.json` 判断当前应执行的轮次，准备 `.txt/.docx` 输入，确定 `finish/intermediate/` 下的本轮输出与 manifest 路径，并在逐块改写完成后调用共享 round service 落盘和更新记录。
+- `scripts/run_aigc_round.py`：服务脚本 API 模式，负责读取 prompt、切块、调用外部 OpenAI 兼容接口并回填结果。
+
+其中，脚本入口负责：
+
+- 读取当前输入文本。
+- 先按原段落切分；若段落超过 850 字，则继续按完整句子的自然断句切分。
+- 对每个处理块逐块执行当前轮改写。
+- 将块结果按原段落结构恢复成完整文本。
+- 将恢复后的本轮文本写入 `finish/intermediate/`。
+- 将分段结构清单写入 manifest 文件，并同步更新 `finish/aigc_records.json`。
+
+该脚本允许两种运行方式并存：
+
+- 对话 skill 模式：由当前对话直接按本 skill 规则完成单轮分段处理，不要求用户自行配置模型 API。
+- 脚本 API 模式：由 `scripts/run_aigc_round.py` 读取 prompt、切块并逐块调用外部 OpenAI 兼容模型接口，用户需要提供 `api_key`、`model` 和 `base_url`（可通过命令行参数或环境变量传入）。
+
+两种方式的依赖边界必须明确：
+
+- 当用户是在聊天对话中直接触发本 skill 时，**不需要**提供 `BAIBAIAIGC_API_KEY`、`BAIBAIAIGC_MODEL`、`BAIBAIAIGC_BASE_URL`；此时应由当前对话直接执行本轮改写逻辑，而不是要求用户补充脚本 API 配置。
+- 只有当明确使用 `scripts/run_aigc_round.py` 走脚本 API 模式，并希望脚本自动逐块调用外部模型接口时，才需要提供上述 API 参数或等价的命令行参数。
+- 如果脚本模式下未提供 API 配置，脚本不应伪装成“已完成改写”；默认应直接报错，或仅在用户显式要求 dry-run 时执行切块与 prompt 校验。无论如何，都不能把“缺少脚本 API 配置”错误表述为“对话 skill 模式也无法执行”。
+
+当本 skill 在聊天框中直接执行时，推荐遵循下面的内部调用顺序：
+
+1. 用 `scripts/skill_round_helper.py` 解析用户给出的文件路径或文本来源，并构建当前轮 `RoundContext`。
+2. 按 `RoundContext.round` 读取对应 prompt。
+3. 对 `RoundContext.input_text_path` 对应文本执行分块，并在当前对话中逐块完成本轮改写。
+4. 将每个块的改写结果回传给共享 round service，写出 `RoundContext.output_text_path` 和 `RoundContext.manifest_path`。
+5. 基于当前轮输出文本做 checklist 评分，并提醒用户如需继续下一轮，需要新开聊天窗口再次触发本 skill。
+
+如果只是需要先确认当前文档会进入哪一轮、对应输入输出路径是什么，可以直接使用 `scripts/skill_round_helper.py` 中的 `dump_round_plan(...)` 查看，不需要调用脚本 API。
+
 ## 输入处理
 
 如果用户直接提供文本：直接处理。
@@ -119,8 +170,11 @@ user-invocable: true
 
 - 推荐做法是：将输入 `.docx` 放入工作区根目录的 `origin/` 目录中，由外部工具（例如本仓库的 `scripts/docx_pipeline.py`）先将文档正文提取为纯文本，再把纯文本交给本 skill 处理，最终再通过同类工具将改写后的文本写回新的 `.docx` 文件。
 - 在没有外部工具时，不要直接把 `.docx` 当作普通文本文件逐行读取，而应要求用户先用其他工具将 `.docx` 转换为纯文本后再继续三轮改写。
+- 在对话 skill 模式下，如果工作区已经具备可用的 `.docx` 读写工具，应优先按本 skill 流程完成当前轮处理；不要因为脚本 API 模式依赖外部模型参数，就错误要求用户为“对话改写”额外提供 `BAIBAIAIGC_API_KEY`、`BAIBAIAIGC_MODEL`、`BAIBAIAIGC_BASE_URL`。
 
 如果用户提供多段内容：逐段处理，但保持整体段落顺序和编号格式不变。
+
+如果用户提供的是整篇论文或长文档：单轮内部也必须先切块再处理，不能整篇一次性改写。
 
 ## 执行流程
 
@@ -128,7 +182,7 @@ user-invocable: true
 
 单次调用时，必须显式遵循以下模式：
 
-`读取降 AIGC 记录并确定当前文档应执行的轮次 -> 读取对应轮次的提示词 -> 读取当前文本（原始文件或上一轮结果） -> 用当前文本执行单轮改写 -> 将本轮结果写入中间目录并对本轮打分 -> 更新降 AIGC 记录 -> 在回复中提示如需下一轮需新开对话`
+`读取降 AIGC 记录并确定当前文档应执行的轮次 -> 读取对应轮次的提示词 -> 读取当前文本（原始文件或上一轮结果） -> 按自然段/断句将当前文本切成最多 850 字的处理块 -> 对每个处理块执行当前轮改写 -> 按原段落结构还原本轮结果 -> 将本轮结果和 manifest 写入中间目录并对本轮打分 -> 更新降 AIGC 记录 -> 在回复中提示如需下一轮需新开对话`
 
 其中，“中间目录”统一约定为工作区根目录下的 `finish/intermediate/`：
 
@@ -137,6 +191,7 @@ user-invocable: true
   - 第 1 轮：`finish/intermediate/原文件名_round1.txt`
   - 第 2 轮：`finish/intermediate/原文件名_round2.txt`
   - 第 3 轮：`finish/intermediate/原文件名_round3.txt`（如果需要单独保留第三轮文本）。
+- 每一轮还应同时写出结构清单，例如 `finish/intermediate/原文件名_round1_manifest.json`，用于记录“原段落 -> 子块”的映射。
 - 当输入来自 `.docx` 时，中间结果可以只以 `.txt` 形式落盘（最终再生成 `.docx`）。
 
 每一轮结束后，都要基于当前轮的文本使用 `checklist.md` 进行一次质量打分，并输出本轮评分结果（可以是简要表格或只给出各维度与总分）。评分可以比最终轮略简化，但必须真实基于当前轮的文本，不得跳过。
@@ -158,9 +213,10 @@ user-invocable: true
 执行要求：
 
 - 按该文件中的规则进行第一轮改写。
+- 改写前先把文本切分为自然块，每块最多 850 字。
 - 优先处理论文和技术文档中的书面化、凝练化、过于整齐的表达。
 - 保持字数不要明显膨胀。
-- 生成“第 1 轮结果”，将其写入 `finish/intermediate/` 中对应文件。
+- 生成“第 1 轮结果”，并按原段落结构还原后写入 `finish/intermediate/` 中对应文件。
 - 使用 `checklist.md` 对“第 1 轮结果”做一次快速评分，并输出本轮评分（可以只给出各维度分数和总分），但不要把这一轮结果当作最终稿交付给用户。
 
 ### 第 2 轮
@@ -173,7 +229,7 @@ user-invocable: true
 
 - 重点清除 AI 套话、空泛提升、宣传腔、机械连接词、三段式列举、否定式排比和破折号滥用。
 - 进一步调整句式节奏，让文本更自然。
-- 生成“第 2 轮结果”，将其写入 `finish/intermediate/` 中对应文件。
+- 生成“第 2 轮结果”，并按原段落结构还原后写入 `finish/intermediate/` 中对应文件。
 - 使用 `checklist.md` 对“第 2 轮结果”做一次快速评分，并输出本轮评分（可以只给出各维度分数和总分），仍然不要把这一轮结果当作最终稿交付给用户。
 
 ### 第 3 轮
@@ -187,7 +243,7 @@ user-invocable: true
 - 在降低 AI 痕迹的同时，重新校正论文语体。
 - 保证文本仍像论文、技术文档或学术说明，而不是口语化文章或营销文案。
 - 控制字数波动，避免明显超出原文。
-- 生成“第 3 轮结果”，将其写入 `finish/intermediate/` 中对应文件（如需长期保留第三轮单独文本）。
+- 生成“第 3 轮结果”，并按原段落结构还原后写入 `finish/intermediate/` 中对应文件（如需长期保留第三轮单独文本）。
 - 使用 `checklist.md` 对“第 3 轮结果”做一次评分，并输出本轮评分；该评分用于观察三轮之间的改写变化，不替代最终交付前的终检评分。
 
 ### 最终检查

@@ -19,6 +19,7 @@ Typical usage:
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Iterable
 
@@ -42,6 +43,17 @@ def read_docx_text(path: Path) -> str:
     return "\n\n".join(non_empty_blocks)
 
 
+def read_docx_paragraphs(path: Path) -> list[str]:
+    """Read a .docx file and return non-empty paragraph texts in order."""
+    document = Document(str(path))
+    paragraphs: list[str] = []
+    for paragraph in document.paragraphs:
+        text = paragraph.text.strip()
+        if text:
+            paragraphs.append(text)
+    return paragraphs
+
+
 def write_docx_text(lines: Iterable[str], path: Path) -> None:
     """Write an iterable of text blocks into a .docx file.
 
@@ -51,6 +63,11 @@ def write_docx_text(lines: Iterable[str], path: Path) -> None:
     for block in lines:
         document.add_paragraph(block)
     document.save(str(path))
+
+
+def write_docx_paragraphs(paragraphs: Iterable[str], path: Path) -> None:
+    """Write one paragraph per entry, preserving paragraph boundaries."""
+    write_docx_text(paragraphs, path)
 
 
 def _split_text_into_blocks(text: str) -> list[str]:
@@ -68,6 +85,16 @@ def _split_text_into_blocks(text: str) -> list[str]:
     if current:
         blocks.append(" ".join(current).strip())
     return blocks
+
+
+def _read_paragraphs_file(path: Path) -> list[str]:
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+            raise SystemExit("Paragraph json must be a string array.")
+        return data
+    text = path.read_text(encoding="utf-8")
+    return _split_text_into_blocks(text)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -89,11 +116,29 @@ def main(argv: list[str] | None = None) -> None:
         "output", type=Path, help="Path to output .txt file"
     )
 
+    extract_paragraphs_parser = subparsers.add_parser(
+        "extract-paragraphs",
+        help="Extract non-empty paragraphs from a .docx file into a JSON array",
+    )
+    extract_paragraphs_parser.add_argument(
+        "input", type=Path, help="Path to input .docx file"
+    )
+    extract_paragraphs_parser.add_argument(
+        "output", type=Path, help="Path to output .json file"
+    )
+
     build_parser = subparsers.add_parser(
         "build", help="Build a .docx file from a plain text file",
     )
     build_parser.add_argument("input", type=Path, help="Path to input .txt file")
     build_parser.add_argument("output", type=Path, help="Path to output .docx file")
+
+    build_paragraphs_parser = subparsers.add_parser(
+        "build-paragraphs",
+        help="Build a .docx file from a paragraph JSON array or block text file",
+    )
+    build_paragraphs_parser.add_argument("input", type=Path, help="Path to paragraph json/txt file")
+    build_paragraphs_parser.add_argument("output", type=Path, help="Path to output .docx file")
 
     args = parser.parse_args(argv)
 
@@ -104,10 +149,20 @@ def main(argv: list[str] | None = None) -> None:
         text = read_docx_text(args.input)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
+    elif args.command == "extract-paragraphs":
+        paragraphs = read_docx_paragraphs(args.input)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps(paragraphs, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     elif args.command == "build":
         text = args.input.read_text(encoding="utf-8")
         blocks = _split_text_into_blocks(text)
         write_docx_text(blocks, args.output)
+    elif args.command == "build-paragraphs":
+        paragraphs = _read_paragraphs_file(args.input)
+        write_docx_paragraphs(paragraphs, args.output)
     else:  # pragma: no cover - argparse guarantees command
         parser.error("Unknown command")
 
