@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from chunking import DEFAULT_CHUNK_LIMIT
-from aigc_round_service import MAX_ROUNDS, build_prompt_input, load_prompt, run_round
+from aigc_round_service import MAX_ROUNDS, build_prompt_input, get_max_rounds, load_prompt, normalize_prompt_profile, run_round
 from llm_client import chat_completion, read_api_config
 
 
@@ -31,10 +31,11 @@ def _build_api_transform(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one segmented AIGC round")
     parser.add_argument("doc_id", help="Document id, usually origin-relative path")
-    parser.add_argument("round", type=int, choices=list(range(1, MAX_ROUNDS + 1)), help="Round number")
+    parser.add_argument("round", type=int, help="Round number")
     parser.add_argument("input_path", type=Path, help="Input text file path")
     parser.add_argument("output_path", type=Path, help="Output text file path")
     parser.add_argument("manifest_path", type=Path, help="Manifest json output path")
+    parser.add_argument("--prompt-profile", default="cn", choices=["cn", "en"], help="Prompt profile: cn=中文两轮, en=英文单轮")
     parser.add_argument("--chunk-limit", type=int, default=DEFAULT_CHUNK_LIMIT)
     parser.add_argument("--score-total", type=int, default=None)
     parser.add_argument("--api-key", default=None, help="LLM API key. Defaults to BAIBAIAIGC_API_KEY or OPENAI_API_KEY.")
@@ -61,6 +62,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    prompt_profile = normalize_prompt_profile(args.prompt_profile)
+    if args.round < 1 or args.round > get_max_rounds(prompt_profile):
+        parser.error(f"Round {args.round} is invalid for prompt profile {prompt_profile}.")
     debug_payload: dict[str, str] = {}
     resolved_api_key, resolved_model, resolved_base_url = read_api_config(
         args.api_key,
@@ -83,7 +87,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     else:
         parser.error("No API configuration found. Provide api_key, model, and base_url, or use --dry-run for chunk verification only.")
 
-    prompt_text = load_prompt(args.round)
+    prompt_text = load_prompt(prompt_profile, args.round)
 
     def transform(chunk_text: str, prompt_input: str, round_number: int, chunk_id: str) -> str:
         if args.echo_prompt_inputs:
@@ -96,6 +100,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         input_path=args.input_path,
         output_path=args.output_path,
         manifest_path=args.manifest_path,
+        prompt_profile=prompt_profile,
         chunk_limit=args.chunk_limit,
         score_total=args.score_total,
         transform=transform,

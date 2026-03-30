@@ -66,6 +66,7 @@ class RoundRecord:
     prompt: str
     input_path: str
     output_path: str
+    prompt_profile: str = "cn"
     score_total: Optional[int] = None
     chunk_limit: Optional[int] = None
     input_segment_count: Optional[int] = None
@@ -170,6 +171,8 @@ def normalize_records(records: Dict[str, Any]) -> Dict[str, Any]:
                 value = normalized_item.get(field)
                 if isinstance(value, str):
                     normalized_item[field] = normalize_record_path(value)
+            prompt_profile = str(normalized_item.get("prompt_profile", "cn") or "cn").strip().lower()
+            normalized_item["prompt_profile"] = prompt_profile if prompt_profile in {"cn", "en"} else "cn"
             merged_by_round[round_number] = normalized_item
 
         target_entry["origin_path"] = normalize_record_path(str(raw_entry.get("origin_path", normalized_key))) or normalized_key
@@ -255,6 +258,7 @@ def update_round(
     doc_id: str,
     round_number: int,
     prompt: str,
+    prompt_profile: str,
     input_path: str,
     output_path: str,
     score_total: Optional[int] = None,
@@ -290,6 +294,7 @@ def update_round(
     record = RoundRecord(
         round=round_number,
         prompt=normalize_record_path(prompt),
+        prompt_profile=str(prompt_profile or "cn").strip().lower() or "cn",
         input_path=normalize_record_path(input_path),
         output_path=normalize_record_path(output_path),
         score_total=score_total,
@@ -440,6 +445,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Prompt file path used for this round (e.g. prompts/baibaiAIGC1.md).",
     )
     update_parser.add_argument(
+        "--prompt-profile",
+        default="cn",
+        choices=["cn", "en"],
+        help="Prompt profile for this round: cn=中文两轮, en=英文单轮.",
+    )
+    update_parser.add_argument(
         "input_path",
         help="Input text file path for this round.",
     )
@@ -491,6 +502,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             doc_id=args.doc_id,
             round_number=args.round,
             prompt=args.prompt,
+            prompt_profile=args.prompt_profile,
             input_path=args.input_path,
             output_path=args.output_path,
             score_total=args.score_total,

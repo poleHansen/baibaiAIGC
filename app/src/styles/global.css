@@ -30,7 +30,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -49,7 +50,8 @@ button:disabled {
   opacity: 0.55;
 }
 
-input {
+input,
+select {
   width: 100%;
   border: 1px solid rgba(60, 60, 67, 0.12);
   background: rgba(255, 255, 255, 0.88);
@@ -59,9 +61,14 @@ input {
   outline: none;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: rgba(0, 113, 227, 0.45);
   box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
+}
+
+select {
+  appearance: none;
 }
 
 .app-shell {
@@ -225,6 +232,31 @@ input:focus {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(60, 60, 67, 0.08);
+}
+
+.segment-button {
+  height: 40px;
+  border-radius: 12px;
+  background: transparent;
+  color: #3a3a3c;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.segment-button.active {
+  background: linear-gradient(180deg, #1185ff 0%, #0071e3 100%);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(0, 113, 227, 0.18);
 }
 
 .toggle-field {

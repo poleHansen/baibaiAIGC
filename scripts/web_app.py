@@ -175,7 +175,8 @@ def post_upload_document() -> tuple[Response, int] | Response:
 @app.route("/api/document-status", methods=["GET"])
 def get_status() -> tuple[Response, int] | Response:
     try:
-        return jsonify(get_document_status(require_query_value("sourcePath")))
+        prompt_profile = request.args.get("promptProfile", "cn")
+        return jsonify(get_document_status(require_query_value("sourcePath"), prompt_profile=prompt_profile))
     except Exception as exc:
         return error_response(str(exc))
 

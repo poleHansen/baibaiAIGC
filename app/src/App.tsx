@@ -38,6 +38,10 @@ function describeDocumentProgress(nextRound: number | null, hasNextRound: boolea
   return "当前文档已完成全部轮次。";
 }
 
+function describePromptProfile(promptProfile: "cn" | "en"): string {
+  return promptProfile === "en" ? "英文单轮提示词" : "中文两轮提示词";
+}
+
 export function App({ service, pickerLabel }: Props) {
   const progressUnlistenRef = useRef<null | (() => void)>(null);
   const {
@@ -86,9 +90,9 @@ export function App({ service, pickerLabel }: Props) {
     };
   }, []);
 
-  async function refreshDocumentState(sourcePath: string) {
+  async function refreshDocumentState(sourcePath: string, config = modelConfig) {
     const [status, nextHistory] = await Promise.all([
-      service.getDocumentStatus(sourcePath),
+      service.getDocumentStatus(sourcePath, config),
       service.getDocumentHistory(sourcePath),
     ]);
     setDocumentStatus(status);
@@ -164,7 +168,10 @@ export function App({ service, pickerLabel }: Props) {
       setRuntimeStep("正在保存模型设置");
       const saved = await service.saveModelConfig(modelConfig);
       setModelConfig(saved);
-      setNotice("模型设置已保存到本地。");
+      if (documentStatus) {
+        await refreshDocumentState(documentStatus.sourcePath, saved);
+      }
+      setNotice(`模型设置已保存到本地，当前模式为${describePromptProfile(saved.promptProfile)}。`);
       setRuntimeStep("模型设置已保存");
     } catch (appError) {
       setError(String(appError));
@@ -209,7 +216,7 @@ export function App({ service, pickerLabel }: Props) {
       setRoundResult(null);
       setPreviewText("");
       setRuntimeStep(status.hasNextRound && status.nextRound ? `已载入文档，当前到第 ${status.nextRound} 轮` : "已载入文档，全部轮次已完成");
-      setNotice(`已导入文档，${describeDocumentProgress(status.nextRound, status.hasNextRound)}`);
+      setNotice(`已导入文档，当前使用${describePromptProfile(modelConfig.promptProfile)}，${describeDocumentProgress(status.nextRound, status.hasNextRound)}`);
     } catch (appError) {
       setError(String(appError));
       setRuntimeStep("读取文档失败");
@@ -239,6 +246,7 @@ export function App({ service, pickerLabel }: Props) {
         setRuntimeStep(formatRuntimeStep(nextProgress, "处理中"));
       }, runToken);
       setRuntimeStep(`准备执行第 ${documentStatus.nextRound} 轮`);
+      setNotice(`本次运行将使用${describePromptProfile(modelConfig.promptProfile)}。`);
       const result = await service.awaitRunRound(documentStatus.sourcePath, modelConfig, runToken);
       progressUnlistenRef.current?.();
       progressUnlistenRef.current = null;

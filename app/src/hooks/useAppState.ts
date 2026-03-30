@@ -5,8 +5,10 @@ const defaultModelConfig: ModelConfig = {
   baseUrl: "",
   apiKey: "",
   model: "",
+  apiMode: "responses",
   temperature: 0.7,
   offlineMode: false,
+  promptProfile: "cn",
 };
 
 type AppState = {

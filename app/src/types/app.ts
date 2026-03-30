@@ -1,9 +1,15 @@
+export type PromptProfile = "cn" | "en";
+
+export type ApiMode = "responses" | "chat-completions";
+
 export type ModelConfig = {
   baseUrl: string;
   apiKey: string;
   model: string;
+  apiMode: ApiMode;
   temperature: number;
   offlineMode: boolean;
+  promptProfile: PromptProfile;
 };
 
 export type RoundProgress = {
@@ -32,6 +38,7 @@ export type DocumentStatus = {
   docId: string;
   sourcePath: string;
   sourceKind: string;
+  promptProfile: PromptProfile;
   completedRounds: number[];
   nextRound: number | null;
   maxRounds: number;
@@ -60,6 +67,7 @@ export type RoundResult = {
 export type HistoryRound = {
   round: number;
   prompt: string;
+  promptProfile: PromptProfile;
   inputPath: string;
   outputPath: string;
   manifestPath: string;

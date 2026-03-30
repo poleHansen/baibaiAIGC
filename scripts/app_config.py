@@ -27,16 +27,20 @@ def load_app_config() -> dict[str, Any]:
             "baseUrl": "",
             "apiKey": "",
             "model": "",
+            "apiMode": "responses",
             "temperature": 0.7,
             "offlineMode": False,
+            "promptProfile": "cn",
         }
     data = json.loads(path.read_text(encoding="utf-8"))
     return {
         "baseUrl": str(data.get("baseUrl", "")),
         "apiKey": str(data.get("apiKey", "")),
         "model": str(data.get("model", "")),
+        "apiMode": str(data.get("apiMode", "responses") or "responses").strip().lower(),
         "temperature": float(data.get("temperature", 0.7)),
         "offlineMode": bool(data.get("offlineMode", False)),
+        "promptProfile": str(data.get("promptProfile", "cn") or "cn"),
     }
 
 
@@ -45,8 +49,10 @@ def save_app_config(config: dict[str, Any]) -> dict[str, Any]:
         "baseUrl": str(config.get("baseUrl", "")).strip(),
         "apiKey": str(config.get("apiKey", "")).strip(),
         "model": str(config.get("model", "")).strip(),
+        "apiMode": str(config.get("apiMode", "responses") or "responses").strip().lower(),
         "temperature": float(config.get("temperature", 0.7)),
         "offlineMode": bool(config.get("offlineMode", False)),
+        "promptProfile": str(config.get("promptProfile", "cn") or "cn").strip().lower(),
     }
     path = get_app_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)

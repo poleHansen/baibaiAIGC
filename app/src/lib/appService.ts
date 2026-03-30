@@ -20,7 +20,7 @@ export interface AppService {
   saveModelConfig(config: ModelConfig): Promise<ModelConfig>;
   testModelConnection(config: ModelConfig): Promise<TestConnectionResult>;
   pickInputFile(): Promise<PickedDocument | null>;
-  getDocumentStatus(sourcePath: string): Promise<DocumentStatus>;
+  getDocumentStatus(sourcePath: string, modelConfig: ModelConfig): Promise<DocumentStatus>;
   getDocumentHistory(sourcePath: string): Promise<DocumentHistory>;
   listDocumentHistories(): Promise<HistoryListResponse>;
   deleteDocumentHistory(docId: string, fromRound?: number): Promise<DeleteHistoryResult>;

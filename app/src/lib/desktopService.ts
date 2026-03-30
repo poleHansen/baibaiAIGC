@@ -18,8 +18,10 @@ const defaultModelConfig: ModelConfig = {
   baseUrl: "",
   apiKey: "",
   model: "",
+  apiMode: "responses",
   temperature: 0.7,
   offlineMode: false,
+  promptProfile: "cn",
 };
 
 export const desktopService: AppService = {
@@ -52,8 +54,8 @@ export const desktopService: AppService = {
     };
   },
 
-  async getDocumentStatus(sourcePath: string): Promise<DocumentStatus> {
-    return invoke<DocumentStatus>("get_document_status", { sourcePath });
+  async getDocumentStatus(sourcePath: string, modelConfig: ModelConfig): Promise<DocumentStatus> {
+    return invoke<DocumentStatus>("get_document_status", { sourcePath, promptProfile: modelConfig.promptProfile });
   },
 
   async getDocumentHistory(sourcePath: string): Promise<DocumentHistory> {

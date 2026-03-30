@@ -34,6 +34,7 @@ struct ModelConfig {
     model: String,
     temperature: f64,
     offline_mode: bool,
+    prompt_profile: String,
 }
 
 fn workspace_root() -> Result<PathBuf, String> {
@@ -229,9 +230,9 @@ async fn test_model_connection(config: ModelConfig) -> Result<TestConnectionResu
 }
 
 #[tauri::command]
-async fn get_document_status(source_path: String) -> Result<serde_json::Value, String> {
+async fn get_document_status(source_path: String, prompt_profile: String) -> Result<serde_json::Value, String> {
     spawn_blocking(move || {
-        let output = run_python_json(&["document-status".to_string(), source_path])?;
+        let output = run_python_json(&["document-status".to_string(), source_path, prompt_profile])?;
         serde_json::from_str(&output).map_err(|error| error.to_string())
     })
     .await

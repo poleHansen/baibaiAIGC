@@ -7,13 +7,22 @@ from aigc_records import ROOT_DIR, update_round
 from chunking import DEFAULT_CHUNK_LIMIT, build_manifest, restore_text_from_chunks, save_manifest
 
 
-MAX_ROUNDS = 2
-
-
-PROMPTS = {
-    1: "prompts/baibaiAIGC1.md",
-    2: "prompts/baibaiAIGC2.md",
+PROMPT_PROFILES = {
+    "cn": {
+        1: "prompts/baibaiAIGC1.md",
+        2: "prompts/baibaiAIGC2.md",
+    },
+    "en": {
+        1: "prompts/baibaiaigc-en.md",
+    },
 }
+
+PROMPT_PROFILE_CHUNK_METRICS = {
+    "cn": "char",
+    "en": "word",
+}
+
+MAX_ROUNDS = max(max(rounds) for rounds in PROMPT_PROFILES.values())
 
 
 Transform = Callable[[str, str, int, str], str]
@@ -75,10 +84,35 @@ def relative_to_root(path: Path) -> str:
         return str(normalized)
 
 
-def load_prompt(round_number: int) -> str:
-    if round_number not in PROMPTS:
-        raise ValueError(f"Round {round_number} is not available. Supported rounds: 1-{MAX_ROUNDS}")
-    prompt_path = ROOT_DIR / PROMPTS[round_number]
+def normalize_prompt_profile(prompt_profile: str | None) -> str:
+    normalized = str(prompt_profile or "cn").strip().lower()
+    if normalized not in PROMPT_PROFILES:
+        raise ValueError(f"Unsupported prompt profile: {normalized}")
+    return normalized
+
+
+def get_prompt_mapping(prompt_profile: str | None) -> dict[int, str]:
+    normalized_profile = normalize_prompt_profile(prompt_profile)
+    return PROMPT_PROFILES[normalized_profile]
+
+
+def get_max_rounds(prompt_profile: str | None) -> int:
+    return max(get_prompt_mapping(prompt_profile))
+
+
+def get_chunk_metric(prompt_profile: str | None) -> str:
+    normalized_profile = normalize_prompt_profile(prompt_profile)
+    return PROMPT_PROFILE_CHUNK_METRICS[normalized_profile]
+
+
+def load_prompt(prompt_profile: str | None, round_number: int) -> str:
+    prompts = get_prompt_mapping(prompt_profile)
+    if round_number not in prompts:
+        raise ValueError(
+            f"Round {round_number} is not available for prompt profile {normalize_prompt_profile(prompt_profile)}. "
+            f"Supported rounds: {sorted(prompts)}"
+        )
+    prompt_path = ROOT_DIR / prompts[round_number]
     return prompt_path.read_text(encoding="utf-8")
 
 
@@ -100,6 +134,7 @@ def run_round(
     output_path: Path,
     manifest_path: Path,
     transform: Transform,
+    prompt_profile: str = "cn",
     chunk_limit: int = DEFAULT_CHUNK_LIMIT,
     score_total: int | None = None,
     progress_callback: ProgressCallback | None = None,
@@ -107,9 +142,11 @@ def run_round(
     normalized_input_path = normalize_path(input_path)
     normalized_output_path = normalize_path(output_path)
     normalized_manifest_path = normalize_path(manifest_path)
+    normalized_prompt_profile = normalize_prompt_profile(prompt_profile)
+    chunk_metric = get_chunk_metric(normalized_prompt_profile)
 
     text = normalized_input_path.read_text(encoding="utf-8")
-    manifest = build_manifest(text, chunk_limit=chunk_limit)
+    manifest = build_manifest(text, chunk_limit=chunk_limit, chunk_metric=chunk_metric)
     save_manifest(manifest, normalized_manifest_path)
 
     if progress_callback is not None:
@@ -124,7 +161,8 @@ def run_round(
             }
         )
 
-    prompt_text = load_prompt(round_number)
+    prompts = get_prompt_mapping(normalized_prompt_profile)
+    prompt_text = load_prompt(normalized_prompt_profile, round_number)
     chunk_outputs = {}
     for index, chunk in enumerate(manifest.chunks, start=1):
         if progress_callback is not None:
@@ -176,7 +214,8 @@ def run_round(
     doc_entry = update_round(
         doc_id=doc_id,
         round_number=round_number,
-        prompt=PROMPTS[round_number],
+        prompt=prompts[round_number],
+        prompt_profile=normalized_prompt_profile,
         input_path=relative_to_root(normalized_input_path),
         output_path=relative_to_root(normalized_output_path),
         score_total=score_total,
