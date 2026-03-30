@@ -55,6 +55,19 @@ export function ModelConfigCard({ value, busy, onChange, onSave, onTestConnectio
         />
       </label>
       <label className="field">
+        <span>接口类型</span>
+        <select
+          value={value.apiType}
+          onChange={(event) => onChange({
+            ...value,
+            apiType: event.target.value as ModelConfig["apiType"],
+          })}
+        >
+          <option value="chat_completions">chat/completions</option>
+          <option value="responses">responses</option>
+        </select>
+      </label>
+      <label className="field">
         <span>Temperature</span>
         <input
           type="number"

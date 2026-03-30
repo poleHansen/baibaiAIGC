@@ -181,7 +181,11 @@ export function App({ service, pickerLabel }: Props) {
       setNotice("");
       setRuntimeStep(modelConfig.offlineMode ? "离线模式无需测试远程接口" : "正在测试接口连通性");
       const result = await service.testModelConnection(modelConfig);
-      setNotice(result.message + (result.endpoint ? ` 接口：${result.endpoint}` : ""));
+      setNotice(
+        result.message
+        + (result.apiType ? ` 类型：${result.apiType}` : "")
+        + (result.endpoint ? ` 接口：${result.endpoint}` : ""),
+      );
       setRuntimeStep(result.offlineMode ? "离线模式已确认" : "接口连通性测试成功");
     } catch (appError) {
       setError(String(appError));

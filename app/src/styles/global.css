@@ -30,7 +30,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -49,7 +50,8 @@ button:disabled {
   opacity: 0.55;
 }
 
-input {
+input,
+select {
   width: 100%;
   border: 1px solid rgba(60, 60, 67, 0.12);
   background: rgba(255, 255, 255, 0.88);
@@ -59,9 +61,29 @@ input {
   outline: none;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: rgba(0, 113, 227, 0.45);
   box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 42px;
+  color: #1d1d1f;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #6e6e73 50%),
+    linear-gradient(135deg, #6e6e73 50%, transparent 50%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88));
+  background-position:
+    calc(100% - 20px) 18px,
+    calc(100% - 14px) 18px,
+    0 0;
+  background-size: 6px 6px, 6px 6px, 100% 100%;
+  background-repeat: no-repeat;
+  cursor: pointer;
 }
 
 .app-shell {

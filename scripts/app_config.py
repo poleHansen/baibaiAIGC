@@ -27,6 +27,7 @@ def load_app_config() -> dict[str, Any]:
             "baseUrl": "",
             "apiKey": "",
             "model": "",
+            "apiType": "chat_completions",
             "temperature": 0.7,
             "offlineMode": False,
         }
@@ -35,6 +36,7 @@ def load_app_config() -> dict[str, Any]:
         "baseUrl": str(data.get("baseUrl", "")),
         "apiKey": str(data.get("apiKey", "")),
         "model": str(data.get("model", "")),
+        "apiType": str(data.get("apiType", "chat_completions")),
         "temperature": float(data.get("temperature", 0.7)),
         "offlineMode": bool(data.get("offlineMode", False)),
     }
@@ -45,6 +47,7 @@ def save_app_config(config: dict[str, Any]) -> dict[str, Any]:
         "baseUrl": str(config.get("baseUrl", "")).strip(),
         "apiKey": str(config.get("apiKey", "")).strip(),
         "model": str(config.get("model", "")).strip(),
+        "apiType": str(config.get("apiType", "chat_completions")).strip() or "chat_completions",
         "temperature": float(config.get("temperature", 0.7)),
         "offlineMode": bool(config.get("offlineMode", False)),
     }

@@ -2,6 +2,7 @@ export type ModelConfig = {
   baseUrl: string;
   apiKey: string;
   model: string;
+  apiType: "chat_completions" | "responses";
   temperature: number;
   offlineMode: boolean;
 };
@@ -25,6 +26,7 @@ export type TestConnectionResult = {
   message: string;
   endpoint: string;
   model: string;
+  apiType?: "chat_completions" | "responses";
   status?: number;
 };
 

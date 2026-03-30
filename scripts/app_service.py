@@ -9,7 +9,7 @@ from typing import Any
 from aigc_records import delete_document, delete_rounds, list_records, normalize_doc_id
 from aigc_round_service import MAX_ROUNDS, normalize_path
 from docx_pipeline import _split_text_into_blocks, write_docx_text
-from llm_client import chat_completion, test_chat_connection
+from llm_client import llm_completion, test_llm_connection
 from skill_round_helper import build_round_context, ensure_skill_input_text, get_document_round_state
 
 
@@ -192,6 +192,7 @@ def run_round_for_app(source_path: str, model_config: dict[str, Any], round_numb
     base_url = str(model_config.get("baseUrl", "")).strip()
     api_key = str(model_config.get("apiKey", "")).strip()
     model = str(model_config.get("model", "")).strip()
+    api_type = str(model_config.get("apiType", "chat_completions")).strip()
     temperature = float(model_config.get("temperature", 0.7))
     offline_mode = bool(model_config.get("offlineMode", False))
 
@@ -203,11 +204,12 @@ def run_round_for_app(source_path: str, model_config: dict[str, Any], round_numb
             return chunk_text
     else:
         def transform(_: str, prompt_input: str, __: int, ___: str) -> str:
-            return chat_completion(
+            return llm_completion(
                 prompt_input,
                 model=model,
                 api_key=api_key,
                 base_url=base_url,
+                api_type=api_type,
                 temperature=temperature,
             )
 
@@ -239,6 +241,7 @@ def test_model_connection(model_config: dict[str, Any]) -> dict[str, Any]:
     base_url = str(model_config.get("baseUrl", "")).strip()
     api_key = str(model_config.get("apiKey", "")).strip()
     model = str(model_config.get("model", "")).strip()
+    api_type = str(model_config.get("apiType", "chat_completions")).strip()
     offline_mode = bool(model_config.get("offlineMode", False))
 
     if offline_mode:
@@ -253,7 +256,7 @@ def test_model_connection(model_config: dict[str, Any]) -> dict[str, Any]:
     if not base_url or not api_key or not model:
         raise ValueError("Model configuration is incomplete.")
 
-    result = test_chat_connection(model=model, api_key=api_key, base_url=base_url)
+    result = test_llm_connection(model=model, api_key=api_key, base_url=base_url, api_type=api_type)
     return {
         "ok": True,
         "offlineMode": False,
