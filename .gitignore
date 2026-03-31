@@ -22,5 +22,26 @@ origin/
 .DS_Store
 Thumbs.db
 
-# GitHub metadata (CI, skills, etc.)
-.github/
+# ideally should be in .git/info/exclude, but just in case
+.idea/
+
+# Python build / test cache
+.pytest_cache/
+.mypy_cache/
+
+# Local env files
+.env
+.env.*
+
+# App binary output
+app/bin/
+
+# PyInstaller output
+build/pyinstaller/
+
+# MSI extract / packaging artifacts
+build/msi_extract/
+build/msi_extract_v011/
+
+# Logs
+*.log

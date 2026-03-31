@@ -18,7 +18,7 @@ const defaultModelConfig: ModelConfig = {
   baseUrl: "",
   apiKey: "",
   model: "",
-  apiMode: "responses",
+  apiType: "responses",
   temperature: 0.7,
   offlineMode: false,
   promptProfile: "cn",

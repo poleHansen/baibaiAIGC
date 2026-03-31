@@ -5,15 +5,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-APP_DIR_NAME = "BaibaiAIGC"
 CONFIG_FILE_NAME = "config.json"
+
+from runtime_paths import get_data_root
 
 
 def get_app_config_dir() -> Path:
-    base_dir = os.getenv("APPDATA")
-    if base_dir:
-        return Path(base_dir) / APP_DIR_NAME
-    return Path.home() / ".baibaiaigc"
+    return get_data_root()
 
 
 def get_app_config_path() -> Path:
@@ -30,6 +28,7 @@ def load_app_config() -> dict[str, Any]:
             "apiType": "chat_completions",
             "temperature": 0.7,
             "offlineMode": False,
+            "promptProfile": "cn",
         }
     data = json.loads(path.read_text(encoding="utf-8"))
     return {
@@ -39,6 +38,7 @@ def load_app_config() -> dict[str, Any]:
         "apiType": str(data.get("apiType", "chat_completions")),
         "temperature": float(data.get("temperature", 0.7)),
         "offlineMode": bool(data.get("offlineMode", False)),
+        "promptProfile": str(data.get("promptProfile", "cn")) or "cn",
     }
 
 
@@ -50,6 +50,7 @@ def save_app_config(config: dict[str, Any]) -> dict[str, Any]:
         "apiType": str(config.get("apiType", "chat_completions")).strip() or "chat_completions",
         "temperature": float(config.get("temperature", 0.7)),
         "offlineMode": bool(config.get("offlineMode", False)),
+        "promptProfile": str(config.get("promptProfile", "cn")).strip() or "cn",
     }
     path = get_app_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)

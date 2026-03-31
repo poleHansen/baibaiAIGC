@@ -5,14 +5,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from aigc_records import ROOT_DIR, load_records
+from aigc_records import ROOT_DIR, load_records, normalize_doc_id
 from aigc_round_service import get_max_rounds, get_prompt_mapping, normalize_path, normalize_prompt_profile, relative_to_root, run_round
 from docx_pipeline import read_docx_text
+from runtime_paths import get_intermediate_dir
 
 
 Transform = Callable[[str, str, int, str], str]
 ProgressCallback = Callable[[dict[str, object]], None]
 INTERMEDIATE_DIR = ROOT_DIR / "finish" / "intermediate"
+INTERMEDIATE_DIR = get_intermediate_dir()
 
 
 @dataclass
@@ -62,6 +64,7 @@ def get_document_round_state(doc_id: str, prompt_profile: str = "cn") -> Documen
         if isinstance(round_item, dict)
         and isinstance(round_item.get("round"), int)
         and str(round_item.get("prompt_profile", "cn") or "cn").strip().lower() == normalized_prompt_profile
+        and _round_output_exists(round_item)
         and 1 <= int(round_item.get("round")) <= max_rounds
     )
     for expected in range(1, max_rounds + 1):
@@ -168,7 +171,7 @@ def dump_round_plan(source_path: Path | str, round_number: int | None = None, pr
 
 
 def _build_doc_id(source_path: Path) -> str:
-    return relative_to_root(source_path)
+    return normalize_doc_id(str(normalize_path(source_path)))
 
 
 def _doc_stem(doc_id: str) -> str:
@@ -189,5 +192,19 @@ def _previous_round_output_path(doc_id: str, round_number: int) -> Path:
             output_path = round_item.get("output_path")
             if not isinstance(output_path, str) or not output_path.strip():
                 break
-            return normalize_path(Path(output_path))
+            normalized_output_path = normalize_path(Path(output_path))
+            if normalized_output_path.exists():
+                return normalized_output_path
+            break
     raise ValueError(f"Round {round_number} output not found for document: {doc_id}")
+
+
+def _round_output_exists(round_item: dict) -> bool:
+    output_path = round_item.get("output_path")
+    if not isinstance(output_path, str) or not output_path.strip():
+        return False
+
+    try:
+        return normalize_path(Path(output_path)).exists()
+    except OSError:
+        return False

@@ -5,6 +5,7 @@ from typing import Callable
 
 from aigc_records import ROOT_DIR, update_round
 from chunking import DEFAULT_CHUNK_LIMIT, build_manifest, restore_text_from_chunks, save_manifest
+from runtime_paths import get_prompt_path
 
 
 PROMPT_PROFILES = {
@@ -112,7 +113,7 @@ def load_prompt(prompt_profile: str | None, round_number: int) -> str:
             f"Round {round_number} is not available for prompt profile {normalize_prompt_profile(prompt_profile)}. "
             f"Supported rounds: {sorted(prompts)}"
         )
-    prompt_path = ROOT_DIR / prompts[round_number]
+    prompt_path = get_prompt_path(prompts[round_number])
     return prompt_path.read_text(encoding="utf-8")
 
 

@@ -1,7 +1,7 @@
 {
   "name": "baibaiaigc-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,10 @@
     "build": "tsc && vite build",
     "build:web": "tsc && vite build --mode web",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_app_service.ps1 && npm run build && tauri build",
+    "desktop:build:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_app_service.ps1 && npm run build && tauri build --debug",
+    "desktop:build:lowmem": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_app_service.ps1 && npm run build && powershell -NoProfile -Command \"$env:CARGO_BUILD_JOBS='1'; $env:RUSTFLAGS='-Ccodegen-units=1'; tauri build\""
   },
   "dependencies": {
     "@tauri-apps/api": "2.10.1",

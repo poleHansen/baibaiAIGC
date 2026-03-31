@@ -20,6 +20,7 @@ const defaultModelConfig: ModelConfig = {
   apiType: "chat_completions",
   temperature: 0.7,
   offlineMode: false,
+  promptProfile: "cn",
 };
 
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {

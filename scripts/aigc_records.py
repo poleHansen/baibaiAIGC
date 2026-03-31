@@ -52,9 +52,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Paths are computed relative to this file: scripts/ -> workspace root.
-ROOT_DIR = Path(__file__).resolve().parents[1]
-FINISH_DIR = ROOT_DIR / "finish"
+from runtime_paths import ensure_app_dirs, get_finish_dir, get_resource_root
+
+ROOT_DIR = get_resource_root()
+FINISH_DIR = get_finish_dir()
 RECORDS_PATH = FINISH_DIR / "aigc_records.json"
 
 
@@ -85,7 +86,7 @@ class RoundRecord:
 
 
 def _ensure_finish_dir() -> None:
-    FINISH_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_app_dirs()
 
 
 def load_records() -> Dict[str, Any]:

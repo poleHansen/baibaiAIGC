@@ -5,6 +5,7 @@ export type ModelConfig = {
   apiType: "chat_completions" | "responses";
   temperature: number;
   offlineMode: boolean;
+  promptProfile: "cn" | "en";
 };
 
 export type RoundProgress = {
