@@ -157,6 +157,10 @@ npm install
 
 后端入口是 [scripts/web_app.py](scripts/web_app.py)，前端入口位于 [app/package.json](app/package.json)。
 
+#### 模式 D：使用app
+
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20Installer-blue?style=for-the-badge&logo=windows)](https://github.com/poleHansen/baibaiAIGC/releases/tag/v1.0.0)
+
 ## Web 端运行说明
 
 先启动 Python 后端：
