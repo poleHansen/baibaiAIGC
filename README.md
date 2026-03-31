@@ -133,16 +133,17 @@ npm install
 - `origin/毕业论文.docx`
 - `origin/毕业论文_原始_utf8.txt`
 
-#### 模式 A：对话 skill 模式
+#### 模式 A：使用app（点击下方链接）
 
-适合直接在聊天中执行当前应进行的一轮改写。
+[![点击下载baibaiAIGC](https://img.shields.io/badge/Download-Windows%20Installer-blue?style=for-the-badge&logo=windows)](https://github.com/poleHansen/baibaiAIGC/releases/tag/v1.0.0)
 
-特点：
+#### 模式 B：Web 模式
 
-- 不需要你手动配置 `API Key / Model / Base URL`
-入口和约束见 [SKILL.md](SKILL.md)。
+适合在浏览器中完成模型配置、文件上传、轮次执行和导出。
 
-#### 模式 B：脚本 API 模式
+后端入口是 [scripts/web_app.py](scripts/web_app.py)，前端入口位于 [app/package.json](app/package.json)。
+
+#### 模式 C：脚本 API 模式
 
 适合用脚本做单轮批处理。
 
@@ -151,15 +152,14 @@ npm install
 
 脚本入口是 [scripts/run_aigc_round.py](scripts/run_aigc_round.py)。
 
-#### 模式 C：Web 模式
+#### 模式 D：对话 skill 模式
 
-适合在浏览器中完成模型配置、文件上传、轮次执行和导出。
+适合直接在聊天中执行当前应进行的一轮改写。
 
-后端入口是 [scripts/web_app.py](scripts/web_app.py)，前端入口位于 [app/package.json](app/package.json)。
+特点：
 
-#### 模式 D：使用app（点击下方链接）
-
-[![点击下载baibaiAIGC](https://img.shields.io/badge/Download-Windows%20Installer-blue?style=for-the-badge&logo=windows)](https://github.com/poleHansen/baibaiAIGC/releases/tag/v1.0.0)
+- 不需要你手动配置 `API Key / Model / Base URL`
+入口和约束见 [SKILL.md](SKILL.md)。
 
 ## Web 端运行说明
 
