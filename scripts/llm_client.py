@@ -5,6 +5,15 @@ import os
 from urllib import error, request
 
 
+def build_headers(api_key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "curl/8.0.0",
+    }
+
+
 def normalize_api_type(api_type: str | None, base_url: str) -> str:
     if api_type:
         normalized = api_type.strip().lower()
@@ -104,10 +113,7 @@ def llm_completion(
     http_request = request.Request(
         endpoint,
         data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=build_headers(api_key),
         method="POST",
     )
 
@@ -141,10 +147,7 @@ def test_llm_connection(
     http_request = request.Request(
         endpoint,
         data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=build_headers(api_key),
         method="POST",
     )
 
