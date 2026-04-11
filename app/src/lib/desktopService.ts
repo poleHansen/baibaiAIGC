@@ -71,11 +71,18 @@ export const desktopService: AppService = {
   },
 
   async startRunRound(): Promise<string | null> {
-    return null;
+    return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   },
 
-  async awaitRunRound(sourcePath: string, modelConfig: ModelConfig): Promise<RoundResult> {
-    return invoke<RoundResult>("run_aigc_round", { sourcePath, modelConfig });
+  async awaitRunRound(sourcePath: string, modelConfig: ModelConfig, runToken?: string | null): Promise<RoundResult> {
+    if (!runToken) {
+      throw new Error("runToken is required in desktop mode.");
+    }
+    return invoke<RoundResult>("run_aigc_round", { sourcePath, modelConfig, runToken });
+  },
+
+  async cancelRunRound(runToken: string): Promise<void> {
+    await invoke("cancel_run_round", { runToken });
   },
 
   async listenRoundProgress(onProgress: (payload: RoundProgress) => void): Promise<UnlistenFn> {

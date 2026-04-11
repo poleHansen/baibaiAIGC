@@ -64,6 +64,16 @@ fn python_executable(root: &Path) -> PathBuf {
     PathBuf::from("python")
 }
 
+fn cancel_flag_path(root: &Path, run_token: &str) -> Result<PathBuf, String> {
+    let sanitized = run_token.trim();
+    if sanitized.is_empty() {
+        return Err("runToken is required".to_string());
+    }
+    let cancel_dir = root.join(".runtime_cancel");
+    std::fs::create_dir_all(&cancel_dir).map_err(|error| error.to_string())?;
+    Ok(cancel_dir.join(format!("{sanitized}.cancel")))
+}
+
 fn run_python_json(args: &[String]) -> Result<String, String> {
     let root = workspace_root()?;
     let python = python_executable(&root);
@@ -275,14 +285,35 @@ async fn delete_document_history(doc_id: String, from_round: Option<i32>) -> Res
 }
 
 #[tauri::command]
-async fn run_aigc_round(window: Window, source_path: String, model_config: ModelConfig) -> Result<serde_json::Value, String> {
+async fn run_aigc_round(window: Window, source_path: String, model_config: ModelConfig, run_token: String) -> Result<serde_json::Value, String> {
     spawn_blocking(move || {
+        let root = workspace_root()?;
+        let cancel_path = cancel_flag_path(&root, &run_token)?;
+        if cancel_path.exists() {
+            std::fs::remove_file(&cancel_path).ok();
+        }
         let config_json = serde_json::to_string(&model_config).map_err(|error| error.to_string())?;
-        run_python_json_streaming(window, &[
+        let result = run_python_json_streaming(window, &[
             "run-round".to_string(),
             source_path,
             config_json,
-        ])
+            "--cancel-file".to_string(),
+            cancel_path.to_string_lossy().to_string(),
+        ]);
+        std::fs::remove_file(&cancel_path).ok();
+        result
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn cancel_run_round(run_token: String) -> Result<serde_json::Value, String> {
+    spawn_blocking(move || {
+        let root = workspace_root()?;
+        let cancel_path = cancel_flag_path(&root, &run_token)?;
+        std::fs::write(&cancel_path, b"cancel").map_err(|error| error.to_string())?;
+        Ok(serde_json::json!({ "ok": true }))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -325,6 +356,7 @@ fn main() {
             list_document_histories,
             delete_document_history,
             run_aigc_round,
+            cancel_run_round,
             read_output_text,
             export_round_output,
         ])

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DocumentCard } from "./components/DocumentCard";
 import { HistoryCard } from "./components/HistoryCard";
 import { ModelConfigCard } from "./components/ModelConfigCard";
@@ -44,6 +44,8 @@ function describePromptProfile(promptProfile: "cn" | "en"): string {
 
 export function App({ service, pickerLabel }: Props) {
   const progressUnlistenRef = useRef<null | (() => void)>(null);
+  const currentRunTokenRef = useRef<string | null>(null);
+  const [pausing, setPausing] = useState(false);
   const {
     modelConfig,
     documentStatus,
@@ -245,6 +247,8 @@ export function App({ service, pickerLabel }: Props) {
       setProgress(null);
       progressUnlistenRef.current?.();
       const runToken = await service.startRunRound(documentStatus.sourcePath, modelConfig);
+      currentRunTokenRef.current = runToken;
+      setPausing(false);
       progressUnlistenRef.current = await service.listenRoundProgress((nextProgress) => {
         setProgress(nextProgress);
         setRuntimeStep(formatRuntimeStep(nextProgress, "处理中"));
@@ -269,10 +273,37 @@ export function App({ service, pickerLabel }: Props) {
       progressUnlistenRef.current?.();
       progressUnlistenRef.current = null;
       setProgress(null);
-      setError(String(appError));
-      setRuntimeStep("执行轮次失败");
+      const message = String(appError);
+      if (/cancelled|已取消|取消/.test(message)) {
+        setNotice("已暂停当前任务");
+        setRuntimeStep("已暂停并完成中断存档");
+      } else {
+        setError(message);
+        setRuntimeStep("执行轮次失败");
+      }
     } finally {
+      currentRunTokenRef.current = null;
+      setPausing(false);
       setBusy(false);
+    }
+  }
+
+  async function handlePauseRound() {
+    const runToken = currentRunTokenRef.current;
+    if (!runToken || !busy) {
+      setNotice("当前没有可暂停的运行任务。");
+      return;
+    }
+    try {
+      setError("");
+      setPausing(true);
+      setRuntimeStep("正在请求暂停并触发中断存档");
+      await service.cancelRunRound(runToken);
+      setNotice("暂停请求已发送");
+    } catch (appError) {
+      setError(String(appError));
+      setRuntimeStep("暂停请求失败");
+      setPausing(false);
     }
   }
 
@@ -354,6 +385,8 @@ export function App({ service, pickerLabel }: Props) {
           busy={busy}
           onPickFile={handlePickFile}
           onRunRound={handleRunRound}
+          onPauseRound={handlePauseRound}
+          canPause={Boolean(documentStatus) && busy && Boolean(currentRunTokenRef.current) && !pausing}
           pickerLabel={pickerLabel}
         />
       </section>

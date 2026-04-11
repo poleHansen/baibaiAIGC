@@ -178,6 +178,12 @@ export const webService: AppService = {
     });
   },
 
+  async cancelRunRound(runToken: string): Promise<void> {
+    await requestJson<{ ok: boolean }>(`/api/cancel-run/${encodeURIComponent(runToken)}`, {
+      method: "POST",
+    });
+  },
+
   async listenRoundProgress(onProgress: (payload: RoundProgress) => void, runToken?: string | null): Promise<() => void> {
     if (!runToken) {
       return async () => undefined;

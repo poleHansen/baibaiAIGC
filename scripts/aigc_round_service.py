@@ -135,10 +135,6 @@ def build_prompt_input(prompt_text: str, chunk_text: str, round_number: int, chu
     )
 
 
-# ---------------------------------------------------------------------------
-# Checkpoint helpers — persist completed chunk results only on error
-# ---------------------------------------------------------------------------
-
 def _checkpoint_path(manifest_path: Path) -> Path:
     """Derive a checkpoint file path from the manifest path."""
     return manifest_path.with_name(
@@ -150,11 +146,6 @@ def _load_checkpoint(
     path: Path,
     expected_total: int,
 ) -> dict[str, str]:
-    """Load a checkpoint file if it exists and matches the expected chunk count.
-
-    Returns a dict mapping chunk_id -> completed output text.
-    Returns an empty dict if the checkpoint is missing, corrupt, or stale.
-    """
     if not path.exists():
         return {}
     try:
@@ -164,7 +155,6 @@ def _load_checkpoint(
     if not isinstance(data, dict):
         return {}
     if int(data.get("total_chunks", -1)) != expected_total:
-        # Input changed since last checkpoint — discard.
         return {}
     completed = data.get("completed_chunks", {})
     if not isinstance(completed, dict):
@@ -182,7 +172,6 @@ def _save_checkpoint(
     error_message: str,
     failed_chunk_id: str | None,
 ) -> None:
-    """Persist in-memory chunk results to a checkpoint file on error."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "doc_id": doc_id,
@@ -198,7 +187,6 @@ def _save_checkpoint(
 
 
 def _delete_checkpoint(path: Path) -> None:
-    """Remove a checkpoint or partial output file if it exists."""
     try:
         if path.exists():
             path.unlink()
@@ -207,10 +195,6 @@ def _delete_checkpoint(path: Path) -> None:
 
 
 def _partial_output_path(output_path: Path) -> Path:
-    """Derive a partial output .txt path from the final output path.
-
-    Example: xxx_round1.txt -> xxx_round1_partial.txt
-    """
     return output_path.with_name(
         output_path.stem + "_partial" + output_path.suffix
     )
@@ -239,7 +223,6 @@ def run_round(
     manifest = build_manifest(text, chunk_limit=chunk_limit, chunk_metric=chunk_metric)
     save_manifest(manifest, normalized_manifest_path)
 
-    # --- Checkpoint: attempt to resume from a previous failed run ---
     ckpt_path = _checkpoint_path(normalized_manifest_path)
     resumed_chunks = _load_checkpoint(ckpt_path, expected_total=manifest.chunk_count)
     resumed_count = len(resumed_chunks)
@@ -264,7 +247,6 @@ def run_round(
 
     try:
         for index, chunk in enumerate(manifest.chunks, start=1):
-            # Skip chunks already completed in a previous (failed) run.
             if chunk.chunk_id in chunk_outputs:
                 if progress_callback is not None:
                     progress_callback(
@@ -278,11 +260,10 @@ def run_round(
                     )
                 continue
 
-            # Check for cancellation before processing each chunk.
             if cancel_event is not None and cancel_event.is_set():
                 raise CancelledError(
-                    f"Operation cancelled before chunk {chunk.chunk_id} "
-                    f"({len(chunk_outputs)}/{manifest.chunk_count} chunks completed)"
+                    f"{chunk.chunk_id}块报错了，运行被取消。"
+                    f"(已完成进度{len(chunk_outputs)}/{manifest.chunk_count} )"
                 )
 
             if progress_callback is not None:
@@ -320,7 +301,6 @@ def run_round(
                     }
                 )
     except Exception as exc:
-        # --- Checkpoint: persist completed chunks on error ---
         partial_txt_path = _partial_output_path(normalized_output_path)
         if chunk_outputs:
             _save_checkpoint(
@@ -332,8 +312,6 @@ def run_round(
                 error_message=str(exc),
                 failed_chunk_id=failed_chunk_id,
             )
-            # Also write a partial .txt: completed chunks use AI result,
-            # uncompleted chunks fall back to original input text.
             merged = {}
             for chunk in manifest.chunks:
                 if chunk.chunk_id in chunk_outputs:
@@ -359,7 +337,6 @@ def run_round(
             )
         raise
 
-    # --- All chunks done: clean up checkpoint + partial output ---
     _delete_checkpoint(ckpt_path)
     _delete_checkpoint(_partial_output_path(normalized_output_path))
 

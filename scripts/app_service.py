@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import shutil
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,16 @@ from skill_round_helper import build_round_context, ensure_skill_input_text, get
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+
+
+class FileCancelEvent:
+    """A lightweight cancel event backed by a filesystem flag file."""
+
+    def __init__(self, cancel_file: Path) -> None:
+        self._cancel_file = cancel_file
+
+    def is_set(self) -> bool:
+        return self._cancel_file.exists()
 
 
 def _map_history_round(item: dict[str, Any]) -> dict[str, Any]:
@@ -363,6 +374,7 @@ def cli_main() -> None:
     run_parser.add_argument("model_config_json", nargs="?", default=None)
     run_parser.add_argument("--config-file", default=None)
     run_parser.add_argument("--round", type=int, default=None)
+    run_parser.add_argument("--cancel-file", default=None)
 
     test_parser = subparsers.add_parser("test-connection")
     test_parser.add_argument("model_config_json", nargs="?", default=None)
@@ -395,12 +407,31 @@ def cli_main() -> None:
             payload = delete_document_history(args.doc_id, args.from_round)
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         elif args.command == "run-round":
-            payload = run_round_for_app(
-                args.source_path,
-                load_model_config_payload(args.model_config_json, args.config_file),
-                args.round,
-            )
-            emit_result_payload(payload)
+            cancel_event: threading.Event | FileCancelEvent | None = None
+            cancel_file_path: Path | None = None
+            if args.cancel_file:
+                cancel_file_path = Path(args.cancel_file).resolve()
+                cancel_file_path.parent.mkdir(parents=True, exist_ok=True)
+                if cancel_file_path.exists():
+                    try:
+                        cancel_file_path.unlink()
+                    except OSError:
+                        pass
+                cancel_event = FileCancelEvent(cancel_file_path)
+            try:
+                payload = run_round_for_app(
+                    args.source_path,
+                    load_model_config_payload(args.model_config_json, args.config_file),
+                    args.round,
+                    cancel_event=cancel_event,
+                )
+                emit_result_payload(payload)
+            finally:
+                if cancel_file_path is not None and cancel_file_path.exists():
+                    try:
+                        cancel_file_path.unlink()
+                    except OSError:
+                        pass
         elif args.command == "test-connection":
             payload = test_model_connection(load_model_config_payload(args.model_config_json, args.config_file))
             print(json.dumps(payload, ensure_ascii=False, indent=2))

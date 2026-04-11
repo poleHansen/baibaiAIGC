@@ -26,6 +26,7 @@ export interface AppService {
   deleteDocumentHistory(docId: string, fromRound?: number): Promise<DeleteHistoryResult>;
   startRunRound(sourcePath: string, modelConfig: ModelConfig): Promise<string | null>;
   awaitRunRound(sourcePath: string, modelConfig: ModelConfig, runToken?: string | null): Promise<RoundResult>;
+  cancelRunRound(runToken: string): Promise<void>;
   listenRoundProgress(onProgress: (payload: RoundProgress) => void, runToken?: string | null): Promise<() => void>;
   readOutput(outputPath: string): Promise<{ path: string; text: string }>;
   exportRound(outputPath: string, targetFormat: "txt" | "docx"): Promise<ExportResult>;

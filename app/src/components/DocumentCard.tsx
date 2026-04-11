@@ -5,6 +5,8 @@ type Props = {
   busy: boolean;
   onPickFile: () => void;
   onRunRound: () => void;
+  onPauseRound: () => void;
+  canPause: boolean;
   pickerLabel?: string;
 };
 
@@ -17,7 +19,7 @@ function displayDocId(status: DocumentStatus): string {
   return status.docId;
 }
 
-export function DocumentCard({ value, busy, onPickFile, onRunRound, pickerLabel = "选择文档" }: Props) {
+export function DocumentCard({ value, busy, onPickFile, onRunRound, onPauseRound, canPause, pickerLabel = "选择文档" }: Props) {
   const canRunNextRound = Boolean(value?.hasNextRound) && !busy;
 
   return (
@@ -55,9 +57,14 @@ export function DocumentCard({ value, busy, onPickFile, onRunRound, pickerLabel 
             <span>当前输入</span>
             <strong>{value.currentInputPath}</strong>
           </div>
-          <button className="primary-button" onClick={onRunRound} disabled={!canRunNextRound}>
-            {value.hasNextRound ? "执行下一轮" : "已完成全部轮次"}
-          </button>
+          <div className="button-column">
+            <button className="primary-button" onClick={onRunRound} disabled={!canRunNextRound}>
+              {value.hasNextRound ? "执行下一轮" : "已完成全部轮次"}
+            </button>
+            <button className="secondary-button" onClick={onPauseRound} disabled={!canPause}>
+              暂停并存档
+            </button>
+          </div>
         </>
       ) : (
         <div className="empty-state">

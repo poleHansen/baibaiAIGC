@@ -409,6 +409,12 @@ select {
   flex: 1 1 160px;
 }
 
+.button-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .empty-state {
   display: flex;
   min-height: 180px;

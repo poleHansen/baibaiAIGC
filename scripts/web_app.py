@@ -35,6 +35,7 @@ class ProgressState:
     events: list[dict[str, Any]] = field(default_factory=list)
     result: dict[str, Any] | None = None
     condition: threading.Condition = field(default_factory=threading.Condition)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
 RUN_STATES: dict[str, ProgressState] = {}
@@ -95,6 +96,10 @@ def finalize_progress(run_id: str, *, result: dict[str, Any] | None = None, erro
 
 def run_round_async(run_id: str, source_path: str, model_config: dict[str, Any]) -> None:
     try:
+        state = RUN_STATES.get(run_id)
+        if not state:
+            finalize_progress(run_id, error="Run state missing.")
+            return
         from app_service import emit_progress_event as original_emit_progress_event
         import app_service
 
@@ -103,7 +108,7 @@ def run_round_async(run_id: str, source_path: str, model_config: dict[str, Any])
 
         app_service.emit_progress_event = capture_progress
         try:
-            result = run_round_for_app(source_path, model_config)
+            result = run_round_for_app(source_path, model_config, cancel_event=state.cancel_event)
         finally:
             app_service.emit_progress_event = original_emit_progress_event
         finalize_progress(run_id, result=result)
@@ -258,6 +263,16 @@ def get_export_round() -> tuple[Response, int] | Response:
         return send_file(file_path, mimetype=mimetype, as_attachment=True, download_name=file_path.name)
     except Exception as exc:
         return error_response(str(exc))
+
+
+@app.route("/api/cancel-run/<run_id>", methods=["POST"])
+def post_cancel_run(run_id: str) -> tuple[Response, int] | Response:
+    state = RUN_STATES.get(run_id)
+    with state.condition:
+        if state.completed:
+            return jsonify({"ok": False, "message": "已完成，无需取消。"}), 409
+        state.cancel_event.set()
+    return jsonify({"ok": True, "message": "已取消"})
 
 
 @app.route("/api/run-round-events/<run_id>", methods=["GET"])
