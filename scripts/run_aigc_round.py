@@ -58,6 +58,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build chunks and prompt inputs without calling the model. Output text will match input text.",
     )
+    parser.add_argument(
+        "--prompt-profile",
+        default="cn",
+        choices=["cn", "en"],
+        help="Prompt profile: cn=Chinese two-round, en=English single-round. Defaults to cn.",
+    )
     return parser
 
 
@@ -88,7 +94,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     else:
         parser.error("No API configuration found. Provide api_key, model, and base_url, or use --dry-run for chunk verification only.")
 
-    prompt_text = load_prompt(args.round)
+    prompt_text = load_prompt(args.prompt_profile, args.round)
 
     def transform(chunk_text: str, prompt_input: str, round_number: int, chunk_id: str) -> str:
         if args.echo_prompt_inputs:
@@ -104,6 +110,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         chunk_limit=args.chunk_limit,
         score_total=args.score_total,
         transform=transform,
+        prompt_profile=args.prompt_profile,
     )
     if debug_payload:
         result["prompt_inputs"] = debug_payload

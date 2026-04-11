@@ -146,6 +146,7 @@ def run_skill_round(
     round_number: int | None = None,
     prompt_profile: str = "cn",
     progress_callback: ProgressCallback | None = None,
+    cancel_event: "threading.Event | None" = None,
 ) -> dict:
     context = build_round_context(source_path, round_number=round_number, prompt_profile=prompt_profile)
     result = run_round(
@@ -157,6 +158,7 @@ def run_skill_round(
         transform=transform,
         prompt_profile=context.prompt_profile,
         progress_callback=progress_callback,
+        cancel_event=cancel_event,
     )
     result["skill_context"] = context.to_dict()
     return result

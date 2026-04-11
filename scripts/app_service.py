@@ -208,7 +208,12 @@ def delete_document_history(doc_id: str, from_round: int | None = None) -> dict[
     return delete_rounds(normalized_doc_id, from_round)
 
 
-def run_round_for_app(source_path: str, model_config: dict[str, Any], round_number: int | None = None) -> dict[str, Any]:
+def run_round_for_app(
+    source_path: str,
+    model_config: dict[str, Any],
+    round_number: int | None = None,
+    cancel_event: "threading.Event | None" = None,
+) -> dict[str, Any]:
     from skill_round_helper import run_skill_round
 
     base_url = str(model_config.get("baseUrl", "")).strip()
@@ -246,6 +251,7 @@ def run_round_for_app(source_path: str, model_config: dict[str, Any], round_numb
         round_number=round_number,
         prompt_profile=prompt_profile,
         progress_callback=emit_progress_event,
+        cancel_event=cancel_event,
     )
     return {
         "round": int(result["round"]),
