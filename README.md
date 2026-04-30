@@ -116,6 +116,32 @@ npm install
 
 后端入口是 [scripts/web_app.py](scripts/web_app.py)，前端入口位于 [app/package.json](app/package.json)。
 
+### 一键安装并启动前后端
+
+如果你只是想把 Web 前后端环境一次性装好并启动，可以直接在仓库根目录运行：
+
+```powershell
+.\start-web.bat
+```
+
+这条命令会自动完成：
+
+- 创建根目录 `.venv` Python 虚拟环境（如果还没有）
+- 安装后端依赖 `requirements.txt`
+- 安装前端依赖 `app/package.json`
+- 分别启动后端 Flask 和前端 Vite 开发服务器
+
+启动成功后可访问：
+
+- 前端：`http://127.0.0.1:1420`
+- 后端：`http://127.0.0.1:8765`
+
+如果依赖已经装好，只想跳过安装、直接启动，可以运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_web_dev.ps1 -SkipInstall
+```
+
 #### 模式 C：脚本 API 模式
 
 适合用脚本做单轮批处理。
@@ -134,7 +160,7 @@ npm install
 - 不需要你手动配置 `API Key / Model / Base URL`
 入口和约束见 [SKILL.md](SKILL.md)。
 
-## Web 端运行说明
+## Web 端运行方式二（自己安装环境运行）
 
 先启动 Python 后端：
 
