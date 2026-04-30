@@ -191,7 +191,10 @@ def _split_into_sentences(text: str, chunk_metric: ChunkMetric) -> list[str]:
 
 
 def _split_long_sentence(sentence: str, chunk_limit: int, chunk_metric: ChunkMetric) -> list[str]:
-    fragments = re.split(r"(?<=[，、：:,])|(?<=[,;:])\s+", sentence)
+    if chunk_metric == "word":
+        fragments = re.split(r"(?<=[,;:])\s+", sentence)
+    else:
+        fragments = re.split(r"(?<=[，、,])", sentence)
     chunks: list[str] = []
     current = ""
     for fragment in fragments:

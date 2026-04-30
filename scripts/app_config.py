@@ -57,7 +57,16 @@ def load_app_config() -> dict[str, Any]:
     path = get_app_config_path()
     if not path.exists():
         return dict(DEFAULT_MODEL_CONFIG)
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return dict(DEFAULT_MODEL_CONFIG)
+    if not raw.strip():
+        return dict(DEFAULT_MODEL_CONFIG)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return dict(DEFAULT_MODEL_CONFIG)
     if not isinstance(data, dict):
         return dict(DEFAULT_MODEL_CONFIG)
     return normalize_model_config(data)

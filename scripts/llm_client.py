@@ -11,6 +11,28 @@ DEFAULT_HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "curl/8.7.1",
 }
+ERROR_BODY_PREVIEW_LIMIT = 240
+
+
+class LLMClientError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        stage: str,
+        retriable: bool = False,
+        provider_status: int | None = None,
+        api_type: str | None = None,
+        detail: str = "",
+    ):
+        super().__init__(message)
+        self.code = code
+        self.stage = stage
+        self.retriable = retriable
+        self.provider_status = provider_status
+        self.api_type = api_type
+        self.detail = detail
 
 
 def normalize_api_type(api_type: str | None, base_url: str) -> str:
@@ -63,7 +85,96 @@ def build_headers(api_key: str) -> dict[str, str]:
     }
 
 
+def _preview_response_body(response_body: str) -> str:
+    compact = " ".join(str(response_body).split())
+    if len(compact) <= ERROR_BODY_PREVIEW_LIMIT:
+        return compact
+    return f"{compact[:ERROR_BODY_PREVIEW_LIMIT]}..."
+
+
+def _raise_http_error(exc: error.HTTPError, api_type: str | None) -> None:
+    detail = exc.read().decode("utf-8", errors="replace")
+    status_code = int(exc.code)
+    preview = _preview_response_body(detail)
+    raise LLMClientError(
+        f"LLM request failed with status {status_code}: {preview}",
+        code="provider_http_error",
+        stage="llm_http",
+        retriable=status_code >= 500 or status_code == 429,
+        provider_status=status_code,
+        api_type=api_type,
+        detail=preview,
+    ) from exc
+
+
+def _load_json_response(
+    response_body: str,
+    *,
+    status_code: int,
+    content_type: str,
+    api_type: str,
+) -> dict[str, object]:
+    preview = _preview_response_body(response_body)
+    try:
+        data = json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        normalized_content_type = content_type.lower()
+        code = "provider_non_json_response" if "json" not in normalized_content_type else "provider_invalid_json"
+        raise LLMClientError(
+            f"LLM returned invalid JSON payload (status {status_code}, content-type {content_type or 'unknown'}): {preview}",
+            code=code,
+            stage="llm_parse",
+            retriable=True,
+            provider_status=status_code,
+            api_type=api_type,
+            detail=preview,
+        ) from exc
+    if not isinstance(data, dict):
+        raise LLMClientError(
+            f"Unexpected LLM response payload: {preview}",
+            code="provider_unexpected_schema",
+            stage="llm_schema",
+            retriable=False,
+            provider_status=status_code,
+            api_type=api_type,
+            detail=preview,
+        )
+    return data
+
+
+def _join_text_parts(parts: list[str]) -> str:
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _extract_text_candidate(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            text = _extract_text_candidate(item)
+            if text:
+                parts.append(text)
+        return _join_text_parts(parts)
+    if not isinstance(value, dict):
+        return ""
+
+    direct_text = value.get("text")
+    if isinstance(direct_text, str) and direct_text.strip():
+        return direct_text.strip()
+
+    nested_text = value.get("content")
+    if isinstance(nested_text, str) and nested_text.strip():
+        return nested_text.strip()
+    if isinstance(nested_text, list):
+        nested_parts = [_extract_text_candidate(item) for item in nested_text]
+        return _join_text_parts(nested_parts)
+
+    return ""
+
+
 def extract_response_text(data: dict[str, object], response_body: str, api_type: str) -> str:
+    preview = _preview_response_body(response_body)
     if api_type == "responses":
         output = data.get("output")
         if isinstance(output, list):
@@ -73,32 +184,102 @@ def extract_response_text(data: dict[str, object], response_body: str, api_type:
                 content = item.get("content")
                 if not isinstance(content, list):
                     continue
-                for part in content:
-                    if not isinstance(part, dict) or part.get("type") != "output_text":
-                        continue
-                    text = part.get("text")
-                    if isinstance(text, str) and text.strip():
-                        return text.strip()
+                text = _extract_text_candidate(content)
+                if text:
+                    return text
 
         output_text = data.get("output_text")
-        if isinstance(output_text, str) and output_text.strip():
-            return output_text.strip()
+        text = _extract_text_candidate(output_text)
+        if text:
+            return text
 
-        raise RuntimeError(f"Unexpected LLM response payload: {response_body}")
+        raise LLMClientError(
+            f"Unexpected LLM response payload: {preview}",
+            code="provider_unexpected_schema",
+            stage="llm_schema",
+            retriable=False,
+            api_type=api_type,
+            detail=preview,
+        )
 
     try:
         choices = data["choices"]
         if not isinstance(choices, list) or not choices:
             raise KeyError("choices")
-        message = choices[0]["message"]
-        if not isinstance(message, dict):
-            raise KeyError("message")
-        content = message["content"]
-        if not isinstance(content, str):
-            raise TypeError("content")
-        return content.strip()
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            raise TypeError("choice")
+
+        message = choice.get("message")
+        if isinstance(message, dict):
+            text = _extract_text_candidate(message.get("content"))
+            if text:
+                return text
+
+        text = _extract_text_candidate(choice.get("text"))
+        if text:
+            return text
+
+        raise KeyError("message.content")
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"Unexpected LLM response payload: {response_body}") from exc
+        raise LLMClientError(
+            f"Unexpected LLM response payload: {preview}",
+            code="provider_unexpected_schema",
+            stage="llm_schema",
+            retriable=False,
+            api_type=api_type,
+            detail=preview,
+        ) from exc
+
+
+def _request_llm_json(
+    payload: dict[str, object],
+    *,
+    api_key: str,
+    base_url: str,
+    api_type: str | None,
+    timeout: int,
+) -> tuple[dict[str, object], int, str, str, str]:
+    resolved_api_type = normalize_api_type(api_type, base_url)
+    endpoint = build_endpoint(base_url, resolved_api_type)
+    body = json.dumps(payload).encode("utf-8")
+
+    http_request = request.Request(
+        endpoint,
+        data=body,
+        headers=build_headers(api_key),
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(http_request, timeout=timeout) as response:
+            response_body = response.read().decode("utf-8", errors="replace")
+            status_code = int(getattr(response, "status", 200) or 200)
+            content_type = str(response.headers.get("Content-Type", "") or "")
+    except error.HTTPError as exc:
+        _raise_http_error(exc, resolved_api_type)
+    except error.URLError as exc:
+        raise LLMClientError(
+            f"LLM request failed: {exc.reason}",
+            code="provider_network_error",
+            stage="llm_http",
+            retriable=True,
+            api_type=resolved_api_type,
+            detail=str(exc.reason),
+        ) from exc
+
+    return (
+        _load_json_response(
+            response_body,
+            status_code=status_code,
+            content_type=content_type,
+            api_type=resolved_api_type,
+        ),
+        status_code,
+        endpoint,
+        resolved_api_type,
+        response_body,
+    )
 
 
 def llm_completion(
@@ -111,30 +292,19 @@ def llm_completion(
     temperature: float = 0.7,
     timeout: int = 120,
 ) -> str:
-    resolved_api_type = normalize_api_type(api_type, base_url)
-    endpoint = build_endpoint(base_url, resolved_api_type)
-    payload = build_payload(prompt, model=model, temperature=temperature, api_type=resolved_api_type)
-    body = json.dumps(payload).encode("utf-8")
-
-    http_request = request.Request(
-        endpoint,
-        data=body,
-        headers=build_headers(api_key),
-        method="POST",
+    payload = build_payload(
+        prompt,
+        model=model,
+        temperature=temperature,
+        api_type=normalize_api_type(api_type, base_url),
     )
-
-    try:
-        with request.urlopen(http_request, timeout=timeout) as response:
-            response_body = response.read().decode("utf-8")
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LLM request failed with status {exc.code}: {detail}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"LLM request failed: {exc.reason}") from exc
-
-    data = json.loads(response_body)
-    if not isinstance(data, dict):
-        raise RuntimeError(f"Unexpected LLM response payload: {response_body}")
+    data, _, _, resolved_api_type, response_body = _request_llm_json(
+        payload,
+        api_key=api_key,
+        base_url=base_url,
+        api_type=api_type,
+        timeout=timeout,
+    )
     return extract_response_text(data, response_body, resolved_api_type)
 
 
@@ -146,30 +316,19 @@ def test_llm_connection(
     api_type: str | None = None,
     timeout: int = 20,
 ) -> dict[str, object]:
-    resolved_api_type = normalize_api_type(api_type, base_url)
-    endpoint = build_endpoint(base_url, resolved_api_type)
-    payload = build_payload("ping", model=model, temperature=0, api_type=resolved_api_type)
-    body = json.dumps(payload).encode("utf-8")
-    http_request = request.Request(
-        endpoint,
-        data=body,
-        headers=build_headers(api_key),
-        method="POST",
+    payload = build_payload(
+        "ping",
+        model=model,
+        temperature=0,
+        api_type=normalize_api_type(api_type, base_url),
     )
-
-    try:
-        with request.urlopen(http_request, timeout=timeout) as response:
-            response_body = response.read().decode("utf-8")
-            status_code = getattr(response, "status", 200)
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LLM request failed with status {exc.code}: {detail}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"LLM request failed: {exc.reason}") from exc
-
-    data = json.loads(response_body)
-    if not isinstance(data, dict):
-        raise RuntimeError(f"Unexpected LLM response payload: {response_body}")
+    data, status_code, endpoint, resolved_api_type, response_body = _request_llm_json(
+        payload,
+        api_key=api_key,
+        base_url=base_url,
+        api_type=api_type,
+        timeout=timeout,
+    )
     extract_response_text(data, response_body, resolved_api_type)
 
     return {

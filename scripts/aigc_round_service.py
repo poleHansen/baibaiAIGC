@@ -48,17 +48,30 @@ SHARED_OUTPUT_CONTRACT = """
 - Do not turn the text into chat, Q&A, title suggestions, bullet recommendations, or markdown formatting unless the input already contains it.
 """.strip()
 
-DISALLOWED_OUTPUT_PATTERNS = (
-    "如果你愿意",
+RETRY_OUTPUT_CONTRACT = """
+[RETRY OUTPUT CONTRACT]
+- Your previous attempt used answer-style phrasing and was rejected.
+- Do not add any answer-style prefix such as 修改后：, 改写后：, 说明：, or any title-like lead-in.
+- Return only the rewritten body text itself, starting directly with the正文内容.
+""".strip()
+
+ANSWER_STYLE_PREFIX_WINDOW = 80
+ANSWER_STYLE_SUFFIX_WINDOW = 120
+PREFIX_WRAPPER_PATTERNS = (
     "可以改成",
     "改写后：",
     "修改后：",
     "说明：",
+)
+SUFFIX_WRAPPER_PATTERNS = (
+    "如果你愿意",
     "原因很简单",
     "我也可以继续帮你",
     "请把需要",
     "你可以直接贴",
 )
+
+ANSWER_STYLE_ERROR_MARKER = "contains disallowed answer-style pattern"
 
 
 def validate_chunk_output(input_text: str, output_text: str, chunk_id: str) -> None:
@@ -66,9 +79,9 @@ def validate_chunk_output(input_text: str, output_text: str, chunk_id: str) -> N
     if not normalized_output:
         raise ValueError(f"Chunk {chunk_id} returned empty output")
 
-    for pattern in DISALLOWED_OUTPUT_PATTERNS:
-        if pattern in normalized_output:
-            raise ValueError(f"Chunk {chunk_id} contains disallowed answer-style pattern: {pattern}")
+    answer_style_pattern = detect_disallowed_answer_style_pattern(input_text, normalized_output)
+    if answer_style_pattern is not None:
+        raise ValueError(f"Chunk {chunk_id} contains disallowed answer-style pattern: {answer_style_pattern}")
 
     markdown_markers = ("**", "### ", "## ", "- **", "> ")
     if any(marker in normalized_output for marker in markdown_markers) and not any(marker in input_text for marker in markdown_markers):
@@ -76,6 +89,95 @@ def validate_chunk_output(input_text: str, output_text: str, chunk_id: str) -> N
 
     if len(normalized_output) > max(len(input_text) * 2, len(input_text) + 200):
         raise ValueError(f"Chunk {chunk_id} expanded abnormally; possible answer-style drift")
+
+
+def is_answer_style_validation_error(exc: Exception) -> bool:
+    return isinstance(exc, ValueError) and ANSWER_STYLE_ERROR_MARKER in str(exc)
+
+
+def _normalize_text_for_wrapper_detection(text: str) -> str:
+    return text.strip()
+
+
+def _normalize_prefix_window(text: str) -> str:
+    return _normalize_text_for_wrapper_detection(text)[:ANSWER_STYLE_PREFIX_WINDOW]
+
+
+def _normalize_suffix_window(text: str) -> str:
+    normalized = _normalize_text_for_wrapper_detection(text)
+    return normalized[-ANSWER_STYLE_SUFFIX_WINDOW:]
+
+
+def _has_body_alignment(candidate_body: str, input_body: str) -> bool:
+    normalized_candidate = _normalize_text_for_wrapper_detection(candidate_body)
+    normalized_input = _normalize_text_for_wrapper_detection(input_body)
+    if not normalized_candidate or not normalized_input:
+        return False
+    if normalized_candidate == normalized_input:
+        return True
+    return normalized_candidate.startswith(normalized_input) or normalized_candidate.endswith(normalized_input)
+
+
+def detect_prefixed_wrapper(input_text: str, output_text: str) -> str | None:
+    normalized_output = _normalize_text_for_wrapper_detection(output_text)
+    normalized_input = _normalize_text_for_wrapper_detection(input_text)
+    output_prefix = normalized_output[:ANSWER_STYLE_PREFIX_WINDOW]
+    input_prefix = normalized_input[:ANSWER_STYLE_PREFIX_WINDOW]
+
+    for pattern in PREFIX_WRAPPER_PATTERNS:
+        if not output_prefix.startswith(pattern):
+            continue
+        if input_prefix.startswith(pattern):
+            continue
+        if _has_body_alignment(normalized_output[len(pattern):], normalized_input):
+            return pattern
+
+    return None
+
+
+def detect_suffixed_wrapper(input_text: str, output_text: str) -> str | None:
+    normalized_output = _normalize_text_for_wrapper_detection(output_text)
+    normalized_input = _normalize_text_for_wrapper_detection(input_text)
+    output_suffix_window = _normalize_suffix_window(normalized_output)
+    input_suffix_window = _normalize_suffix_window(normalized_input)
+
+    for pattern in SUFFIX_WRAPPER_PATTERNS:
+        if pattern not in output_suffix_window:
+            continue
+        output_suffix_index = normalized_output.rfind(pattern)
+        if output_suffix_index < 0:
+            continue
+        if pattern in input_suffix_window and normalized_input.rfind(pattern) == output_suffix_index:
+            continue
+        if _has_body_alignment(normalized_output[:output_suffix_index], normalized_input):
+            return pattern
+
+    return None
+
+
+def detect_wrapped_chat_answer(input_text: str, output_text: str) -> str | None:
+    prefix_pattern = detect_prefixed_wrapper(input_text, output_text)
+    if prefix_pattern is None:
+        return None
+
+    normalized_output = _normalize_text_for_wrapper_detection(output_text)
+    prefix_stripped_output = normalized_output[len(prefix_pattern):]
+    suffix_pattern = detect_suffixed_wrapper(input_text, prefix_stripped_output)
+    if suffix_pattern is None:
+        return prefix_pattern
+    return f"{prefix_pattern} ... {suffix_pattern}"
+
+
+def detect_disallowed_answer_style_pattern(input_text: str, output_text: str) -> str | None:
+    wrapped_pattern = detect_wrapped_chat_answer(input_text, output_text)
+    if wrapped_pattern is not None:
+        return wrapped_pattern
+
+    suffix_pattern = detect_suffixed_wrapper(input_text, output_text)
+    if suffix_pattern is not None:
+        return suffix_pattern
+
+    return None
 
 
 def normalize_path(path: Path) -> Path:
@@ -125,15 +227,53 @@ def load_prompt(prompt_profile: str | None, round_number: int) -> str:
     return prompt_path.read_text(encoding="utf-8")
 
 
-def build_prompt_input(prompt_text: str, chunk_text: str, round_number: int, chunk_id: str) -> str:
+def build_prompt_input(
+    prompt_text: str,
+    chunk_text: str,
+    round_number: int,
+    chunk_id: str,
+    extra_contract: str | None = None,
+) -> str:
+    contract_parts = [SHARED_OUTPUT_CONTRACT]
+    if extra_contract:
+        contract_parts.append(extra_contract.strip())
+    contract_text = "\n\n".join(part for part in contract_parts if part.strip())
     return (
         f"[ROUND {round_number}]\n"
         f"[CHUNK {chunk_id}]\n\n"
         f"{prompt_text.strip()}\n\n"
-        f"{SHARED_OUTPUT_CONTRACT}\n\n"
+        f"{contract_text}\n\n"
         "[INPUT TEXT]\n"
         f"{chunk_text}"
     )
+
+
+def _rewrite_chunk_with_validation(
+    transform: Transform,
+    prompt_text: str,
+    chunk_text: str,
+    round_number: int,
+    chunk_id: str,
+) -> str:
+    prompt_input = build_prompt_input(prompt_text, chunk_text, round_number, chunk_id)
+    chunk_output = transform(chunk_text, prompt_input, round_number, chunk_id)
+    try:
+        validate_chunk_output(chunk_text, chunk_output, chunk_id)
+        return chunk_output
+    except Exception as exc:
+        if not is_answer_style_validation_error(exc):
+            raise
+
+    retry_prompt_input = build_prompt_input(
+        prompt_text,
+        chunk_text,
+        round_number,
+        chunk_id,
+        extra_contract=RETRY_OUTPUT_CONTRACT,
+    )
+    retry_output = transform(chunk_text, retry_prompt_input, round_number, chunk_id)
+    validate_chunk_output(chunk_text, retry_output, chunk_id)
+    return retry_output
 
 
 def build_progress_path(manifest_path: Path) -> Path:
@@ -327,13 +467,13 @@ def run_round(
                 }
             )
         try:
-            chunk_output = transform(
+            chunk_output = _rewrite_chunk_with_validation(
+                transform,
+                prompt_text,
                 chunk.text,
-                build_prompt_input(prompt_text, chunk.text, round_number, chunk.chunk_id),
                 round_number,
                 chunk.chunk_id,
             )
-            validate_chunk_output(chunk.text, chunk_output, chunk.chunk_id)
         except Exception as exc:
             error_message = str(exc)
             progress_payload["status"] = "paused"
