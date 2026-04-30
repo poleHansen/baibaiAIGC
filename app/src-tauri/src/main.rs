@@ -277,6 +277,16 @@ async fn delete_document_history(doc_id: String, from_round: Option<i32>) -> Res
 }
 
 #[tauri::command]
+async fn request_stop(source_path: String, prompt_profile: String) -> Result<serde_json::Value, String> {
+    spawn_blocking(move || {
+        let output = run_python_json(&["request-stop".to_string(), source_path, prompt_profile])?;
+        serde_json::from_str(&output).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn run_aigc_round(window: Window, source_path: String, model_config: ModelConfig) -> Result<serde_json::Value, String> {
     spawn_blocking(move || {
         let config_json = serde_json::to_string(&model_config).map_err(|error| error.to_string())?;
@@ -326,6 +336,7 @@ fn main() {
             get_document_history,
             list_document_histories,
             delete_document_history,
+            request_stop,
             run_aigc_round,
             read_output_text,
             export_round_output,

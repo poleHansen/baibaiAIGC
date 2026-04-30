@@ -17,11 +17,14 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from aigc_round_service import (
     RoundPausedError,
+    RoundStoppedError,
     build_progress_path,
+    build_stop_request_path,
     detect_disallowed_answer_style_pattern,
     detect_prefixed_wrapper,
     detect_suffixed_wrapper,
     detect_wrapped_chat_answer,
+    request_stop,
     run_round,
     validate_chunk_output,
 )
@@ -235,6 +238,96 @@ class RunRoundRetryTests(unittest.TestCase):
                 )
 
         self.assertEqual(call_count, 1)
+
+    def test_user_requested_stop_marks_progress_stopped(self) -> None:
+        temp_path = self.make_temp_dir()
+        input_path = temp_path / "input.txt"
+        output_path = temp_path / "output.txt"
+        manifest_path = temp_path / "manifest.json"
+        progress_path = build_progress_path(manifest_path)
+        stop_path = build_stop_request_path(manifest_path)
+        input_path.write_text("第一段。\n\n第二段。", encoding="utf-8")
+
+        call_count = 0
+
+        def transform(chunk_text: str, __: str, ___: int, ____: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                request_stop(progress_path)
+            return f"{chunk_text} 已改写"
+
+        with patch("aigc_round_service.update_round", return_value={"ok": True}):
+            with self.assertRaisesRegex(RoundStoppedError, "用户手动停止"):
+                run_round(
+                    doc_id="tests/stopped.txt",
+                    round_number=1,
+                    input_path=input_path,
+                    output_path=output_path,
+                    manifest_path=manifest_path,
+                    transform=transform,
+                    chunk_limit=3,
+                )
+
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        self.assertEqual(progress["status"], "stopped")
+        self.assertEqual(progress["completed_chunks"], 1)
+        self.assertEqual(progress["stop_reason"], "用户手动停止，保留当前进度，可继续执行当前轮。")
+        self.assertFalse(progress["stop_requested"])
+        self.assertFalse(stop_path.exists())
+
+    def test_resume_after_stop_uses_saved_progress(self) -> None:
+        temp_path = self.make_temp_dir()
+        input_path = temp_path / "input.txt"
+        output_path = temp_path / "output.txt"
+        manifest_path = temp_path / "manifest.json"
+        input_path.write_text("第一段。\n\n第二段。", encoding="utf-8")
+
+        first_call_count = 0
+
+        def stop_after_first_chunk(chunk_text: str, __: str, ___: int, ____: str) -> str:
+            nonlocal first_call_count
+            first_call_count += 1
+            if first_call_count == 1:
+                request_stop(build_progress_path(manifest_path))
+            return f"{chunk_text} 已改写"
+
+        with patch("aigc_round_service.update_round", return_value={"ok": True}):
+            with self.assertRaises(RoundStoppedError):
+                run_round(
+                    doc_id="tests/resume-after-stop.txt",
+                    round_number=1,
+                    input_path=input_path,
+                    output_path=output_path,
+                    manifest_path=manifest_path,
+                    transform=stop_after_first_chunk,
+                    chunk_limit=3,
+                )
+
+        resumed_call_count = 0
+
+        def resume_transform(chunk_text: str, __: str, ___: int, ____: str) -> str:
+            nonlocal resumed_call_count
+            resumed_call_count += 1
+            return f"{chunk_text} 已改写"
+
+        with patch("aigc_round_service.update_round", return_value={"ok": True}):
+            result = run_round(
+                doc_id="tests/resume-after-stop.txt",
+                round_number=1,
+                input_path=input_path,
+                output_path=output_path,
+                manifest_path=manifest_path,
+                transform=resume_transform,
+                chunk_limit=3,
+            )
+
+        self.assertTrue(result["resumed"])
+        self.assertEqual(resumed_call_count, result["completed_chunk_count"] - 1)
+        output_text = output_path.read_text(encoding="utf-8")
+        self.assertIn("第一段", output_text)
+        self.assertIn("第二段", output_text)
+        self.assertIn("已改写", output_text)
 
 
 if __name__ == "__main__":

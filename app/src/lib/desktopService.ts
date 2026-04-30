@@ -61,6 +61,10 @@ export const desktopService: AppService = {
     return invoke<DeleteHistoryResult>("delete_document_history", { docId, fromRound: fromRound ?? null });
   },
 
+  async requestStop(sourcePath: string, modelConfig: ModelConfig): Promise<DocumentStatus> {
+    return invoke<DocumentStatus>("request_stop", { sourcePath, promptProfile: modelConfig.promptProfile });
+  },
+
   async startRunRound(): Promise<string | null> {
     return null;
   },

@@ -26,3 +26,5 @@ Thumbs.db
 .github/
 
 /.idea
+
+tests/

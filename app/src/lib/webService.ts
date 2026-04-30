@@ -249,6 +249,13 @@ export const webService: AppService = {
     });
   },
 
+  async requestStop(sourcePath: string, modelConfig: ModelConfig): Promise<DocumentStatus> {
+    return requestJson<DocumentStatus>("/api/request-stop", {
+      method: "POST",
+      body: JSON.stringify({ sourcePath, promptProfile: modelConfig.promptProfile }),
+    });
+  },
+
   async startRunRound(sourcePath: string, modelConfig: ModelConfig): Promise<string | null> {
     const { runId } = await requestJson<{ runId: string }>("/api/run-round", {
       method: "POST",

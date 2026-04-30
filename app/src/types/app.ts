@@ -6,7 +6,8 @@ export type RoundProgressPhase =
   | "processing-chunk"
   | "chunk-error"
   | "chunk-complete"
-  | "restoring-output";
+  | "restoring-output"
+  | "stopped";
 
 export type ModelConfig = {
   baseUrl: string;
@@ -59,6 +60,7 @@ export type RoundProgress = {
   progressPath?: string;
   resumed?: boolean;
   error?: string;
+  message?: string;
 };
 
 export type TestConnectionResult = {
@@ -89,6 +91,8 @@ export type DocumentStatus = {
   totalChunkCount: number;
   lastError: string;
   lastErrorChunkId: string;
+  stopRequested: boolean;
+  stopReason: string;
   latestOutputPath: string;
   extractedFromDocx: boolean;
 };
@@ -121,6 +125,8 @@ export type HistoryRound = {
   totalChunkCount: number;
   lastError: string;
   lastErrorChunkId: string;
+  stopRequested: boolean;
+  stopReason: string;
   scoreTotal: number | null;
   chunkLimit: number | null;
   inputSegmentCount: number | null;

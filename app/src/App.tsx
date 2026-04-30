@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DocumentCard } from "./components/DocumentCard";
 import { HistoryCard } from "./components/HistoryCard";
 import { ModelConfigCard } from "./components/ModelConfigCard";
@@ -36,6 +36,9 @@ function formatRuntimeStep(progress: RoundProgress | null, fallback: string): st
   if (progress.phase === "chunk-complete" && progress.currentChunk && progress.totalChunks) {
     return `第 ${progress.round} 轮已完成第 ${progress.currentChunk}/${progress.totalChunks} 块`;
   }
+  if (progress.phase === "stopped") {
+    return progress.message || `第 ${progress.round} 轮已停止，可从当前进度继续`;
+  }
   return fallback;
 }
 
@@ -56,6 +59,9 @@ function describeProgressStatus(status: string): string {
   if (status === "paused") {
     return "已暂停，等待手动继续";
   }
+  if (status === "stopped") {
+    return "已停止，可从当前进度继续";
+  }
   return "未开始";
 }
 
@@ -65,6 +71,7 @@ function describePromptProfile(promptProfile: "cn" | "en"): string {
 
 export function App({ service, pickerLabel }: Props) {
   const progressUnlistenRef = useRef<null | (() => void)>(null);
+  const [stopBusy, setStopBusy] = useState(false);
   const {
     modelConfig,
     documentStatus,
@@ -162,7 +169,7 @@ export function App({ service, pickerLabel }: Props) {
           setRoundResult(null);
           setPreviewText("");
         } else {
-          const matchedItem = items.find((item) => item.docId === docId);
+          const matchedItem = items.find((entry) => entry.docId === docId);
           if (matchedItem) {
             await refreshDocumentState(matchedItem.sourcePath);
             setRoundResult(null);
@@ -244,15 +251,33 @@ export function App({ service, pickerLabel }: Props) {
       const resumeNotice = status.totalChunkCount && status.completedChunkCount
         ? `检测到第 ${status.nextRound} 轮已有 ${status.completedChunkCount}/${status.totalChunkCount} 块进度，可直接续跑。`
         : "";
-      const errorNotice = status.lastError
-        ? ` 当前暂停原因：${status.lastError}`
-        : "";
-      setNotice(`已导入文档，当前使用${describePromptProfile(modelConfig.promptProfile)}，${describeDocumentProgress(status.nextRound, status.hasNextRound)}${resumeNotice}${errorNotice}`);
+      const errorNotice = status.lastError ? ` 当前暂停原因：${status.lastError}` : "";
+      const stopNotice = status.stopReason ? ` 当前停止说明：${status.stopReason}` : "";
+      setNotice(`已导入文档，当前使用${describePromptProfile(modelConfig.promptProfile)}，${describeDocumentProgress(status.nextRound, status.hasNextRound)}${resumeNotice}${errorNotice}${stopNotice}`);
     } catch (appError) {
       setError(String(appError));
       setRuntimeStep("读取文档失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleStopRound() {
+    if (!documentStatus || !busy) {
+      return;
+    }
+    try {
+      setStopBusy(true);
+      setError("");
+      setNotice("已发送停止请求，当前块处理完成后会停下。");
+      setRuntimeStep("停止请求已发送，等待当前块收尾");
+      const status = await service.requestStop(documentStatus.sourcePath, modelConfig);
+      setDocumentStatus(status);
+    } catch (appError) {
+      setError(String(appError));
+      setRuntimeStep("发送停止请求失败");
+    } finally {
+      setStopBusy(false);
     }
   }
 
@@ -267,6 +292,7 @@ export function App({ service, pickerLabel }: Props) {
     }
     try {
       setBusy(true);
+      setStopBusy(false);
       setError("");
       setNotice("");
       setProgress(null);
@@ -277,6 +303,9 @@ export function App({ service, pickerLabel }: Props) {
         setRuntimeStep(formatRuntimeStep(nextProgress, "处理中"));
         if (nextProgress.phase === "chunk-error") {
           setNotice(nextProgress.error || "本轮已暂停，请检查网络或模型接口后手动继续。");
+        }
+        if (nextProgress.phase === "stopped") {
+          setNotice(nextProgress.message || "已按你的请求停止，当前进度已保留。");
         }
       }, runToken);
       setRuntimeStep(`准备执行第 ${documentStatus.nextRound} 轮`);
@@ -306,15 +335,27 @@ export function App({ service, pickerLabel }: Props) {
       const pausedMessage = latestStatus?.progressStatus === "paused"
         ? latestStatus.lastError || "网络异常或模型请求失败，当前轮已暂停，请手动点击继续。"
         : "";
+      const stoppedMessage = latestStatus?.progressStatus === "stopped"
+        ? latestStatus.stopReason || "已按你的请求停止，当前进度已保留。"
+        : "";
       setProgress(null);
-      setError(pausedMessage || String(appError));
+      setError(pausedMessage ? pausedMessage : stoppedMessage ? "" : String(appError));
       setNotice(
         pausedMessage
           ? `已暂停在第 ${latestStatus?.nextRound ?? documentStatus.nextRound} 轮，保留已完成进度，请处理后手动继续。`
-          : "",
+          : stoppedMessage
+            ? `已停止在第 ${latestStatus?.nextRound ?? documentStatus.nextRound} 轮，保留已完成进度，随时可以继续执行当前轮。`
+            : "",
       );
-      setRuntimeStep(pausedMessage ? "执行已暂停，等待手动继续" : "执行轮次失败");
+      setRuntimeStep(
+        pausedMessage
+          ? "执行已暂停，等待手动继续"
+          : stoppedMessage
+            ? "执行已停止，等待手动继续"
+            : "执行轮次失败",
+      );
     } finally {
+      setStopBusy(false);
       setBusy(false);
     }
   }
@@ -368,7 +409,7 @@ export function App({ service, pickerLabel }: Props) {
       <div className="hero-panel">
         <div>
           <p className="eyebrow">baibaiAIGC</p>
-          <h1>超级超级好用的降AI神器！</h1>
+          <h1>超级超级好用的降 AI 神器！</h1>
           <p className="hero-copy">
             这是一个面向中文论文与技术文档的 Windows 桌面工作台。你可以配置模型、导入 txt 或 Word，逐轮执行改写，并在每轮结束后导出 txt 或 Word。
           </p>
@@ -395,10 +436,12 @@ export function App({ service, pickerLabel }: Props) {
         <DocumentCard
           value={documentStatus}
           busy={busy}
+          stopBusy={stopBusy}
           onPickFile={handlePickFile}
           onRunRound={handleRunRound}
+          onStop={handleStopRound}
           pickerLabel={pickerLabel}
-            progressStatusLabel={documentStatus ? describeProgressStatus(documentStatus.progressStatus) : "未开始"}
+          progressStatusLabel={documentStatus ? describeProgressStatus(documentStatus.progressStatus) : "未开始"}
         />
       </section>
 

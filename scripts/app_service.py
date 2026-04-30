@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from aigc_records import delete_document, delete_rounds, list_records, normalize_doc_id
-from aigc_round_service import MAX_ROUNDS, build_progress_path, normalize_path
+from aigc_round_service import MAX_ROUNDS, build_progress_path, normalize_path, request_stop
 from app_config import normalize_model_config
 from docx_pipeline import _split_text_into_blocks, write_docx_text
 from llm_client import llm_completion, test_llm_connection
@@ -27,6 +27,8 @@ def _read_progress_summary(manifest_path: str) -> dict[str, Any]:
             "totalChunkCount": 0,
             "lastError": "",
             "lastErrorChunkId": "",
+            "stopRequested": False,
+            "stopReason": "",
         }
 
     progress_path = build_progress_path(normalize_path(Path(manifest_path)))
@@ -38,6 +40,8 @@ def _read_progress_summary(manifest_path: str) -> dict[str, Any]:
             "totalChunkCount": 0,
             "lastError": "",
             "lastErrorChunkId": "",
+            "stopRequested": False,
+            "stopReason": "",
         }
 
     data = json.loads(progress_path.read_text(encoding="utf-8"))
@@ -49,6 +53,8 @@ def _read_progress_summary(manifest_path: str) -> dict[str, Any]:
             "totalChunkCount": 0,
             "lastError": "",
             "lastErrorChunkId": "",
+            "stopRequested": False,
+            "stopReason": "",
         }
 
     return {
@@ -58,6 +64,8 @@ def _read_progress_summary(manifest_path: str) -> dict[str, Any]:
         "totalChunkCount": int(data.get("total_chunks", 0) or 0),
         "lastError": str(data.get("last_error", "") or ""),
         "lastErrorChunkId": str(data.get("last_error_chunk_id", "") or ""),
+        "stopRequested": bool(data.get("stop_requested")),
+        "stopReason": str(data.get("stop_reason", "") or ""),
     }
 
 
@@ -76,6 +84,8 @@ def _map_history_round(item: dict[str, Any]) -> dict[str, Any]:
         "totalChunkCount": progress["totalChunkCount"],
         "lastError": progress["lastError"],
         "lastErrorChunkId": progress["lastErrorChunkId"],
+        "stopRequested": progress["stopRequested"],
+        "stopReason": progress["stopReason"],
         "scoreTotal": item.get("score_total"),
         "chunkLimit": item.get("chunk_limit"),
         "inputSegmentCount": item.get("input_segment_count"),
@@ -181,6 +191,8 @@ def get_document_status(source_path: str, prompt_profile: str = "cn") -> dict[st
     total_chunk_count = 0
     last_error = ""
     last_error_chunk_id = ""
+    stop_requested = False
+    stop_reason = ""
 
     if round_state.next_round is not None:
         context = build_round_context(
@@ -198,6 +210,8 @@ def get_document_status(source_path: str, prompt_profile: str = "cn") -> dict[st
         total_chunk_count = int(progress["totalChunkCount"])
         last_error = str(progress["lastError"])
         last_error_chunk_id = str(progress["lastErrorChunkId"])
+        stop_requested = bool(progress["stopRequested"])
+        stop_reason = str(progress["stopReason"])
 
     if rounds:
         latest_round = max(
@@ -232,9 +246,20 @@ def get_document_status(source_path: str, prompt_profile: str = "cn") -> dict[st
         "totalChunkCount": total_chunk_count,
         "lastError": last_error,
         "lastErrorChunkId": last_error_chunk_id,
+        "stopRequested": stop_requested,
+        "stopReason": stop_reason,
         "latestOutputPath": latest_output_path,
         "extractedFromDocx": extracted_from_docx,
     }
+
+
+def request_stop_for_app(source_path: str, prompt_profile: str = "cn") -> dict[str, Any]:
+    status = get_document_status(source_path, prompt_profile=prompt_profile)
+    progress_path = str(status.get("progressPath", "") or "")
+    if not progress_path:
+        raise ValueError("Current document has no active round progress to stop.")
+    request_stop(Path(progress_path))
+    return get_document_status(source_path, prompt_profile=prompt_profile)
 
 
 def get_document_history(source_path: str) -> dict[str, Any]:
@@ -439,6 +464,10 @@ def cli_main() -> None:
     delete_history_parser.add_argument("doc_id")
     delete_history_parser.add_argument("--from-round", type=int, default=None)
 
+    stop_parser = subparsers.add_parser("request-stop")
+    stop_parser.add_argument("source_path")
+    stop_parser.add_argument("prompt_profile", nargs="?", default="cn")
+
     run_parser = subparsers.add_parser("run-round")
     run_parser.add_argument("source_path")
     run_parser.add_argument("model_config_json", nargs="?", default=None)
@@ -474,6 +503,9 @@ def cli_main() -> None:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         elif args.command == "delete-document-history":
             payload = delete_document_history(args.doc_id, args.from_round)
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        elif args.command == "request-stop":
+            payload = request_stop_for_app(args.source_path, prompt_profile=args.prompt_profile)
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         elif args.command == "run-round":
             payload = run_round_for_app(

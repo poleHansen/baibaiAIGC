@@ -24,6 +24,7 @@ export interface AppService {
   getDocumentHistory(sourcePath: string): Promise<DocumentHistory>;
   listDocumentHistories(): Promise<HistoryListResponse>;
   deleteDocumentHistory(docId: string, fromRound?: number): Promise<DeleteHistoryResult>;
+  requestStop(sourcePath: string, modelConfig: ModelConfig, runToken?: string | null): Promise<DocumentStatus>;
   startRunRound(sourcePath: string, modelConfig: ModelConfig): Promise<string | null>;
   awaitRunRound(sourcePath: string, modelConfig: ModelConfig, runToken?: string | null): Promise<RoundResult>;
   listenRoundProgress(onProgress: (payload: RoundProgress) => void, runToken?: string | null): Promise<() => void>;

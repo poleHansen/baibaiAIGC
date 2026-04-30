@@ -3,8 +3,10 @@ import type { DocumentStatus } from "../types/app";
 type Props = {
   value: DocumentStatus | null;
   busy: boolean;
+  stopBusy: boolean;
   onPickFile: () => void;
   onRunRound: () => void;
+  onStop: () => void;
   pickerLabel?: string;
   progressStatusLabel: string;
 };
@@ -28,8 +30,18 @@ function renderResumeStatus(status: DocumentStatus): string {
   return "当前轮还没有已保存的分块进度。";
 }
 
-export function DocumentCard({ value, busy, onPickFile, onRunRound, pickerLabel = "选择文档", progressStatusLabel }: Props) {
+export function DocumentCard({
+  value,
+  busy,
+  stopBusy,
+  onPickFile,
+  onRunRound,
+  onStop,
+  pickerLabel = "选择文档",
+  progressStatusLabel,
+}: Props) {
   const canRunNextRound = Boolean(value?.hasNextRound) && !busy;
+  const canStop = Boolean(value?.hasNextRound) && busy && !stopBusy;
 
   return (
     <section className="glass-card section-stack">
@@ -86,9 +98,24 @@ export function DocumentCard({ value, busy, onPickFile, onRunRound, pickerLabel 
               <strong>{value.lastError}</strong>
             </div>
           ) : null}
-          <button className="primary-button" onClick={onRunRound} disabled={!canRunNextRound}>
-            {value.progressStatus === "paused" ? "继续执行当前轮" : value.hasNextRound ? "执行下一轮" : "已完成全部轮次"}
-          </button>
+          {value.stopReason ? (
+            <div className="path-box">
+              <span>停止说明</span>
+              <strong>{value.stopReason}</strong>
+            </div>
+          ) : null}
+          <div className="button-row">
+            <button className="primary-button" onClick={onRunRound} disabled={!canRunNextRound}>
+              {value.progressStatus === "paused" || value.progressStatus === "stopped"
+                ? "继续执行当前轮"
+                : value.hasNextRound
+                  ? "执行下一轮"
+                  : "已完成全部轮次"}
+            </button>
+            <button className="secondary-button" onClick={onStop} disabled={!canStop}>
+              {stopBusy || value.stopRequested ? "停止中..." : "停止当前轮"}
+            </button>
+          </div>
         </>
       ) : (
         <div className="empty-state">

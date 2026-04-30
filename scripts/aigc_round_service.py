@@ -38,6 +38,13 @@ class RoundPausedError(RuntimeError):
         self.total_chunks = total_chunks
 
 
+class RoundStoppedError(RuntimeError):
+    def __init__(self, message: str, *, completed_chunks: int, total_chunks: int):
+        super().__init__(message)
+        self.completed_chunks = completed_chunks
+        self.total_chunks = total_chunks
+
+
 SHARED_OUTPUT_CONTRACT = """
 [OUTPUT CONTRACT]
 - Only return the rewritten body text for the current input chunk.
@@ -286,6 +293,18 @@ def build_progress_path(manifest_path: Path) -> Path:
     return normalized_manifest_path.with_name(progress_name)
 
 
+def build_stop_request_path(manifest_path: Path) -> Path:
+    normalized_manifest_path = normalize_path(manifest_path)
+    path_stem = normalized_manifest_path.stem
+    if path_stem.endswith("_manifest"):
+        stop_name = f"{path_stem[:-9]}_stop.json"
+    elif path_stem.endswith("_progress"):
+        stop_name = f"{path_stem[:-9]}_stop.json"
+    else:
+        stop_name = f"{path_stem}_stop.json"
+    return normalized_manifest_path.with_name(stop_name)
+
+
 def _default_progress_payload(
     manifest: ChunkManifest,
     *,
@@ -307,6 +326,8 @@ def _default_progress_payload(
         "completed_chunks": 0,
         "last_error": "",
         "last_error_chunk_id": "",
+        "stop_requested": False,
+        "stop_reason": "",
         "chunk_outputs": {},
     }
 
@@ -367,6 +388,8 @@ def _load_progress_payload(
             "status": str(data.get("status", "in_progress") or "in_progress"),
             "last_error": str(data.get("last_error", "") or ""),
             "last_error_chunk_id": str(data.get("last_error_chunk_id", "") or ""),
+            "stop_requested": bool(data.get("stop_requested")),
+            "stop_reason": str(data.get("stop_reason", "") or ""),
             "chunk_outputs": chunk_outputs,
             "completed_chunks": len(chunk_outputs),
         }
@@ -377,6 +400,86 @@ def _load_progress_payload(
 def _save_progress_payload(progress_path: Path, payload: dict[str, object]) -> None:
     progress_path.parent.mkdir(parents=True, exist_ok=True)
     progress_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def request_stop(progress_path: Path, *, reason: str = "用户手动停止，保留当前进度，可继续执行当前轮。") -> dict[str, object]:
+    normalized_progress_path = normalize_path(progress_path)
+    stop_request_path = build_stop_request_path(normalized_progress_path)
+    stop_request_path.parent.mkdir(parents=True, exist_ok=True)
+    stop_payload = {
+        "requested": True,
+        "reason": reason,
+    }
+    stop_request_path.write_text(json.dumps(stop_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if normalized_progress_path.exists():
+        try:
+            progress_payload = json.loads(normalized_progress_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            progress_payload = {}
+        if isinstance(progress_payload, dict):
+            progress_payload["stop_requested"] = True
+            progress_payload["stop_reason"] = reason
+            _save_progress_payload(normalized_progress_path, progress_payload)
+
+    return stop_payload
+
+
+def _consume_stop_request(stop_request_path: Path) -> str:
+    normalized_stop_request_path = normalize_path(stop_request_path)
+    if not normalized_stop_request_path.exists():
+        return ""
+    try:
+        data = json.loads(normalized_stop_request_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        data = {}
+    reason = ""
+    if isinstance(data, dict):
+        reason = str(data.get("reason", "") or "")
+    normalized_stop_request_path.unlink(missing_ok=True)
+    return reason or "用户手动停止，保留当前进度，可继续执行当前轮。"
+
+
+def _stop_if_requested(
+    *,
+    stop_request_path: Path,
+    progress_path: Path,
+    progress_payload: dict[str, object],
+    round_number: int,
+    completed_chunks: int,
+    total_chunks: int,
+    progress_callback: ProgressCallback | None,
+) -> None:
+    reason = _consume_stop_request(stop_request_path)
+    if not reason:
+        return
+
+    progress_payload["status"] = "stopped"
+    progress_payload["completed_chunks"] = completed_chunks
+    progress_payload["stop_requested"] = False
+    progress_payload["stop_reason"] = reason
+    progress_payload["last_error"] = ""
+    progress_payload["last_error_chunk_id"] = ""
+    _save_progress_payload(progress_path, progress_payload)
+
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "phase": "stopped",
+                "round": round_number,
+                "totalChunks": total_chunks,
+                "completedChunks": completed_chunks,
+                "remainingChunks": total_chunks - completed_chunks,
+                "progressPath": str(progress_path),
+                "message": reason,
+            }
+        )
+
+    raise RoundStoppedError(
+        reason,
+        completed_chunks=completed_chunks,
+        total_chunks=total_chunks,
+    )
 
 
 def run_round(
@@ -395,6 +498,7 @@ def run_round(
     normalized_output_path = normalize_path(output_path)
     normalized_manifest_path = normalize_path(manifest_path)
     normalized_progress_path = build_progress_path(normalized_manifest_path)
+    normalized_stop_request_path = build_stop_request_path(normalized_manifest_path)
     normalized_prompt_profile = normalize_prompt_profile(prompt_profile)
     chunk_metric = get_chunk_metric(normalized_prompt_profile)
 
@@ -417,6 +521,10 @@ def run_round(
     progress_payload["total_chunks"] = manifest.chunk_count
     if progress_payload.get("status") == "completed" and completed_chunks < manifest.chunk_count:
         progress_payload["status"] = "paused"
+    elif progress_payload.get("status") == "stopped" and completed_chunks < manifest.chunk_count:
+        progress_payload["status"] = "in_progress"
+    progress_payload["stop_requested"] = False
+    progress_payload["stop_reason"] = ""
     _save_progress_payload(normalized_progress_path, progress_payload)
 
     if progress_callback is not None:
@@ -439,6 +547,15 @@ def run_round(
     prompts = get_prompt_mapping(normalized_prompt_profile)
     prompt_text = load_prompt(normalized_prompt_profile, round_number)
     for index, chunk in enumerate(manifest.chunks, start=1):
+        _stop_if_requested(
+            stop_request_path=normalized_stop_request_path,
+            progress_path=normalized_progress_path,
+            progress_payload=progress_payload,
+            round_number=round_number,
+            completed_chunks=len(chunk_outputs),
+            total_chunks=manifest.chunk_count,
+            progress_callback=progress_callback,
+        )
         if chunk.chunk_id in chunk_outputs:
             if progress_callback is not None:
                 progress_callback(
@@ -505,6 +622,8 @@ def run_round(
         progress_payload["status"] = "in_progress"
         progress_payload["last_error"] = ""
         progress_payload["last_error_chunk_id"] = ""
+        progress_payload["stop_requested"] = False
+        progress_payload["stop_reason"] = ""
         progress_payload["completed_chunks"] = len(chunk_outputs)
         _save_progress_payload(normalized_progress_path, progress_payload)
 
@@ -520,6 +639,16 @@ def run_round(
                     "progressPath": str(normalized_progress_path),
                 }
             )
+
+    _stop_if_requested(
+        stop_request_path=normalized_stop_request_path,
+        progress_path=normalized_progress_path,
+        progress_payload=progress_payload,
+        round_number=round_number,
+        completed_chunks=len(chunk_outputs),
+        total_chunks=manifest.chunk_count,
+        progress_callback=progress_callback,
+    )
 
     restored = restore_text_from_chunks(manifest, chunk_outputs)
 
@@ -537,6 +666,8 @@ def run_round(
     normalized_output_path.write_text(restored, encoding="utf-8")
     progress_payload["status"] = "completed"
     progress_payload["completed_chunks"] = len(chunk_outputs)
+    progress_payload["stop_requested"] = False
+    progress_payload["stop_reason"] = ""
     _save_progress_payload(normalized_progress_path, progress_payload)
 
     doc_entry = update_round(

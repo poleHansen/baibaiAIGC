@@ -19,6 +19,7 @@ from app_service import (
     get_document_status,
     list_document_histories,
     read_output_text,
+    request_stop_for_app,
     run_round_for_app,
     test_model_connection,
 )
@@ -272,6 +273,17 @@ def post_run_round() -> tuple[Response, int] | Response:
         )
         worker.start()
         return jsonify({"runId": run_id}), 202
+    except Exception as exc:
+        return error_response(str(exc))
+
+
+@app.route("/api/request-stop", methods=["POST"])
+def post_request_stop() -> tuple[Response, int] | Response:
+    try:
+        payload = request.get_json(silent=True) or {}
+        source_path = require_managed_source_path(str(payload.get("sourcePath", "")).strip())
+        prompt_profile = str(payload.get("promptProfile", "cn") or "cn")
+        return jsonify(request_stop_for_app(source_path, prompt_profile=prompt_profile))
     except Exception as exc:
         return error_response(str(exc))
 
