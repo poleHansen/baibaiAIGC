@@ -40,10 +40,16 @@
  为了“过检测”而随意改动事实或专业内容
 
 
-安装依赖：
+安装后端依赖：
 
 ```powershell
 pip install -r requirements.txt
+```
+
+macOS / Linux 可使用：
+
+```bash
+python3 -m pip install -r requirements.txt
 ```
 
 Web 前端依赖安装：
@@ -82,10 +88,18 @@ npm install
 
 ### 一键安装并启动前后端
 
-如果你只是想把 Web 前后端环境一次性装好并启动，可以直接在仓库根目录运行：
+如果你只是想把 Web 前后端环境一次性装好并启动，可以直接在仓库根目录按系统运行。
+
+Windows：
 
 ```powershell
 .\start-web.bat
+```
+
+macOS / Linux：
+
+```bash
+./start-web.sh
 ```
 
 这条命令会自动完成：
@@ -97,13 +111,21 @@ npm install
 
 启动成功后可访问：
 
-- 前端：`http://127.0.0.1:1420`
+- 前端：以 Vite 输出为准，通常是 `http://localhost:1420/`
 - 后端：`http://127.0.0.1:8765`
 
 如果依赖已经装好，只想跳过安装、直接启动，可以运行：
 
+Windows：
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start_web_dev.ps1 -SkipInstall
+```
+
+macOS / Linux：
+
+```bash
+./start-web.sh --skip-install
 ```
 
 #### 模式 C：脚本 API 模式
@@ -130,6 +152,12 @@ skill 入口和约束见 [SKILL.md](SKILL.md)。
 
 ```powershell
 python scripts/web_app.py
+```
+
+macOS / Linux 如果系统没有 `python` 命令，可使用：
+
+```bash
+python3 scripts/web_app.py
 ```
 
 再启动前端开发服务器：

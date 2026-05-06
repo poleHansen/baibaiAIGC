@@ -7,6 +7,8 @@ use std::process::{Command, Stdio};
 use tauri::async_runtime::spawn_blocking;
 use tauri::{Emitter, Window};
 
+mod python_runtime;
+
 const ROUND_PROGRESS_EVENT: &str = "round-progress";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,17 +60,9 @@ fn script_path(root: &Path, relative_path: &str) -> String {
     root.join(relative_path).to_string_lossy().replace('\\', "\\\\")
 }
 
-fn python_executable(root: &Path) -> PathBuf {
-    let venv_python = root.join(".venv").join("Scripts").join("python.exe");
-    if venv_python.exists() {
-        return venv_python;
-    }
-    PathBuf::from("python")
-}
-
 fn run_python_json(args: &[String]) -> Result<String, String> {
     let root = workspace_root()?;
-    let python = python_executable(&root);
+    let python = python_runtime::executable(&root);
     let mut command = Command::new(python);
     command.current_dir(&root);
     command.env("PYTHONIOENCODING", "utf-8");
@@ -89,7 +83,7 @@ fn run_python_json(args: &[String]) -> Result<String, String> {
 
 fn run_python_json_streaming(window: Window, args: &[String]) -> Result<serde_json::Value, String> {
     let root = workspace_root()?;
-    let python = python_executable(&root);
+    let python = python_runtime::executable(&root);
     let mut command = Command::new(python);
     command.current_dir(&root);
     command.env("PYTHONIOENCODING", "utf-8");
@@ -167,7 +161,7 @@ fn run_python_json_streaming(window: Window, args: &[String]) -> Result<serde_js
 
 fn run_python_inline(code: &str) -> Result<String, String> {
     let root = workspace_root()?;
-    let python = python_executable(&root);
+    let python = python_runtime::executable(&root);
     let output = Command::new(python)
         .current_dir(&root)
         .env("PYTHONIOENCODING", "utf-8")
