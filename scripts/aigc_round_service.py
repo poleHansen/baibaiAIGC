@@ -24,6 +24,24 @@ PROMPT_PROFILE_CHUNK_METRICS = {
 }
 
 MAX_ROUNDS = max(max(rounds) for rounds in PROMPT_PROFILES.values())
+MAX_CHUNK_ATTEMPTS = 3
+RETRIABLE_ERROR_CODES = {
+    "provider_empty_response",
+    "provider_invalid_json",
+    "provider_network_error",
+    "provider_non_json_response",
+    "provider_timeout",
+}
+RETRIABLE_ERROR_MARKERS = (
+    "connection aborted",
+    "connection reset",
+    "empty response",
+    "expecting value",
+    "invalid json",
+    "rate limit",
+    "timed out",
+    "too many requests",
+)
 
 
 Transform = Callable[[str, str, int, str], str]
@@ -100,6 +118,22 @@ def validate_chunk_output(input_text: str, output_text: str, chunk_id: str) -> N
 
 def is_answer_style_validation_error(exc: Exception) -> bool:
     return isinstance(exc, ValueError) and ANSWER_STYLE_ERROR_MARKER in str(exc)
+
+
+def is_retriable_chunk_error(exc: Exception) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if bool(getattr(current, "retriable", False)):
+            return True
+        code = str(getattr(current, "code", "") or "").strip().lower()
+        if code in RETRIABLE_ERROR_CODES:
+            return True
+        current = current.__cause__ or current.__context__
+
+    normalized_message = str(exc).lower()
+    return any(marker in normalized_message for marker in RETRIABLE_ERROR_MARKERS)
 
 
 def _normalize_text_for_wrapper_detection(text: str) -> str:
@@ -722,13 +756,36 @@ def run_round(
             if target_paragraph_index_set and chunk.paragraph_index not in target_paragraph_index_set:
                 chunk_output = chunk.text
             else:
-                chunk_output = _rewrite_chunk_with_validation(
-                    transform,
-                    prompt_text,
-                    chunk.text,
-                    round_number,
-                    chunk.chunk_id,
-                )
+                chunk_output = ""
+                for attempt in range(1, MAX_CHUNK_ATTEMPTS + 1):
+                    try:
+                        chunk_output = _rewrite_chunk_with_validation(
+                            transform,
+                            prompt_text,
+                            chunk.text,
+                            round_number,
+                            chunk.chunk_id,
+                        )
+                        break
+                    except Exception as exc:
+                        if attempt >= MAX_CHUNK_ATTEMPTS or not is_retriable_chunk_error(exc):
+                            raise
+                        error_message = str(exc)
+                        if progress_callback is not None:
+                            progress_callback(
+                                {
+                                    "phase": "chunk-retry",
+                                    "round": round_number,
+                                    "currentChunk": index,
+                                    "totalChunks": manifest.chunk_count,
+                                    "completedChunks": len(chunk_outputs),
+                                    "chunkId": chunk.chunk_id,
+                                    "attempt": attempt + 1,
+                                    "maxAttempts": MAX_CHUNK_ATTEMPTS,
+                                    "error": error_message,
+                                    "errorMessage": error_message,
+                                }
+                            )
         except Exception as exc:
             error_message = str(exc)
             progress_payload["status"] = "paused"

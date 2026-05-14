@@ -16,6 +16,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from aigc_round_service import (
+    MAX_CHUNK_ATTEMPTS,
     RoundPausedError,
     RoundStoppedError,
     build_progress_path,
@@ -256,6 +257,88 @@ class RunRoundRetryTests(unittest.TestCase):
                 )
 
         self.assertEqual(call_count, 1)
+
+    def test_retriable_chunk_failure_retries_and_succeeds(self) -> None:
+        temp_path = self.make_temp_dir()
+        input_path = temp_path / "input.txt"
+        output_path = temp_path / "output.txt"
+        manifest_path = temp_path / "manifest.json"
+        progress_path = build_progress_path(manifest_path)
+        input_path.write_text("Retry base text.", encoding="utf-8")
+        progress_events: list[dict[str, object]] = []
+
+        class TransientChunkError(RuntimeError):
+            retriable = True
+
+        call_count = 0
+
+        def transform(chunk_text: str, __: str, ___: int, ____: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count < MAX_CHUNK_ATTEMPTS:
+                raise TransientChunkError("temporary timeout")
+            return f"{chunk_text} rewritten"
+
+        with patch("aigc_round_service.update_round", return_value={"ok": True}):
+            result = run_round(
+                doc_id="tests/retriable-success.txt",
+                round_number=1,
+                input_path=input_path,
+                output_path=output_path,
+                manifest_path=manifest_path,
+                transform=transform,
+                progress_callback=lambda event: progress_events.append(dict(event)),
+            )
+
+        retry_events = [event for event in progress_events if event.get("phase") == "chunk-retry"]
+        self.assertEqual(call_count, MAX_CHUNK_ATTEMPTS)
+        self.assertEqual([event["attempt"] for event in retry_events], [2, 3])
+        self.assertTrue(all(event["maxAttempts"] == MAX_CHUNK_ATTEMPTS for event in retry_events))
+        self.assertEqual(result["completed_chunk_count"], 1)
+        self.assertEqual(output_path.read_text(encoding="utf-8"), "Retry base text. rewritten")
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        self.assertEqual(progress["status"], "completed")
+        self.assertEqual(progress["completed_chunks"], 1)
+        self.assertEqual(progress["last_error"], "")
+
+    def test_retriable_chunk_failure_pauses_after_max_attempts(self) -> None:
+        temp_path = self.make_temp_dir()
+        input_path = temp_path / "input.txt"
+        output_path = temp_path / "output.txt"
+        manifest_path = temp_path / "manifest.json"
+        progress_path = build_progress_path(manifest_path)
+        input_path.write_text("Retry failure text.", encoding="utf-8")
+        progress_events: list[dict[str, object]] = []
+
+        class TransientChunkError(RuntimeError):
+            retriable = True
+
+        call_count = 0
+
+        def transform(_: str, __: str, ___: int, ____: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            raise TransientChunkError("temporary timeout")
+
+        with patch("aigc_round_service.update_round", return_value={"ok": True}):
+            with self.assertRaisesRegex(RoundPausedError, "temporary timeout"):
+                run_round(
+                    doc_id="tests/retriable-fail.txt",
+                    round_number=1,
+                    input_path=input_path,
+                    output_path=output_path,
+                    manifest_path=manifest_path,
+                    transform=transform,
+                    progress_callback=lambda event: progress_events.append(dict(event)),
+                )
+
+        retry_events = [event for event in progress_events if event.get("phase") == "chunk-retry"]
+        self.assertEqual(call_count, MAX_CHUNK_ATTEMPTS)
+        self.assertEqual([event["attempt"] for event in retry_events], [2, 3])
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        self.assertEqual(progress["status"], "paused")
+        self.assertEqual(progress["completed_chunks"], 0)
+        self.assertIn("temporary timeout", progress["last_error"])
 
     def test_user_requested_stop_marks_progress_stopped(self) -> None:
         temp_path = self.make_temp_dir()

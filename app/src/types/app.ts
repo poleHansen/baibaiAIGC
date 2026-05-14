@@ -5,6 +5,7 @@ export type RoundProgressPhase =
   | "chunk-skipped"
   | "processing-chunk"
   | "chunk-error"
+  | "chunk-retry"
   | "chunk-complete"
   | "restoring-output"
   | "stopped";
@@ -60,6 +61,9 @@ export type RoundProgress = {
   progressPath?: string;
   resumed?: boolean;
   error?: string;
+  errorMessage?: string;
+  attempt?: number;
+  maxAttempts?: number;
   message?: string;
   applyMode?: ApplyMode | "";
   targetParagraphIndexes?: number[];

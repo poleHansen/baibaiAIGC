@@ -34,6 +34,11 @@ function formatRuntimeStep(progress: RoundProgress | null, fallback: string): st
   if (progress.phase === "chunk-error") {
     return `第 ${progress.round} 轮已暂停，第 ${progress.currentChunk}/${progress.totalChunks} 块处理失败`;
   }
+  if (progress.phase === "chunk-retry" && progress.currentChunk && progress.totalChunks) {
+    const attempt = progress.attempt ?? 1;
+    const maxAttempts = progress.maxAttempts ?? attempt;
+    return `第 ${progress.round} 轮第 ${progress.currentChunk}/${progress.totalChunks} 块请求失败，正在自动重试 ${attempt}/${maxAttempts}`;
+  }
   if (progress.phase === "processing-chunk" && progress.currentChunk && progress.totalChunks) {
     return `正在执行第 ${progress.round} 轮，第 ${progress.currentChunk}/${progress.totalChunks} 块`;
   }
@@ -378,6 +383,9 @@ export function App({ service, pickerLabel }: Props) {
         setRuntimeStep(formatRuntimeStep(nextProgress, "处理中"));
         if (nextProgress.phase === "chunk-error") {
           setNotice(nextProgress.error || "本轮已暂停，请检查网络或模型接口后手动继续。");
+        }
+        if (nextProgress.phase === "chunk-retry") {
+          setNotice(nextProgress.errorMessage || nextProgress.error || "当前 chunk 请求失败，正在自动重试。");
         }
         if (nextProgress.phase === "stopped") {
           setNotice(nextProgress.message || "已按你的请求停止，当前进度已保留。");

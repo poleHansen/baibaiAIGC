@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from urllib import error, request
 
 
@@ -115,6 +116,17 @@ def _load_json_response(
     api_type: str,
 ) -> dict[str, object]:
     preview = _preview_response_body(response_body)
+    if not str(response_body).strip():
+        raise LLMClientError(
+            f"LLM returned an empty response body (status {status_code}, content-type {content_type or 'unknown'}).",
+            code="provider_empty_response",
+            stage="llm_parse",
+            retriable=True,
+            provider_status=status_code,
+            api_type=api_type,
+            detail="",
+        )
+
     try:
         data = json.loads(response_body)
     except json.JSONDecodeError as exc:
@@ -266,6 +278,15 @@ def _request_llm_json(
             retriable=True,
             api_type=resolved_api_type,
             detail=str(exc.reason),
+        ) from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise LLMClientError(
+            f"LLM request timed out after {timeout} seconds",
+            code="provider_timeout",
+            stage="llm_http",
+            retriable=True,
+            api_type=resolved_api_type,
+            detail=str(exc),
         ) from exc
 
     return (
