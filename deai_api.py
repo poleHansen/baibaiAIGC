@@ -11,8 +11,6 @@ import os
 import re
 import sys
 import tempfile
-import threading
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -34,15 +32,6 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-ALLOWED_API_KEYS = re.compile(
-    r"(api_key|api-key|apikey|base.?url|model|openai_api_key|openai_base_url)"
-    r"|(" + "|".join(re.escape(k) for k in (
-        "BAIBAIAIGC_API_KEY", "BAIBAIAIGC_MODEL", "BAIBAIAIGC_BASE_URL",
-        "OPENAI_API_KEY", "OPENAI_BASE_URL",
-    )) + r")",
-    re.IGNORECASE,
-)
 
 
 def _resolve_api_config(payload: dict) -> tuple[str | None, str | None, str | None, str | None]:
@@ -318,8 +307,11 @@ def deai_process() -> tuple[Response, int]:
             timeout=timeout,
         )
         return jsonify(result), 200
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    except Exception:
+        # Log the full traceback server-side but do not leak internal details
+        # (stack frames, file paths, etc.) to the caller.
+        app.logger.exception("deai_process failed")
+        return jsonify({"error": "internal error processing deai request"}), 500
 
 
 # ---------------------------------------------------------------------------

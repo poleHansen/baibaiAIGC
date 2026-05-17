@@ -17,9 +17,6 @@ from typing import Callable
 # ---------------------------------------------------------------------------
 
 _FENCE_RE = re.compile(r"^(`{3,}|~{3,})\s*\w*\s*$", re.MULTILINE)
-_TABLE_RE = re.compile(
-    r"^(\|[^\n]+\n\|[-: |]+\n(?:\|[^\n]+\n)+)", re.MULTILINE
-)
 _LIST_RE = re.compile(r"(?m)(?:^[-*+]\s[^\n]*(?:\n|$))+")
 _OLIST_RE = re.compile(r"(?m)(?:^\d+\.\s[^\n]*(?:\n|$))+")
 _BLOCKQUOTE_RE = re.compile(r"(?m)(?:^>[^\n]*(?:\n|$))+")
@@ -35,13 +32,43 @@ class MarkdownBlock:
 # List item patterns (allow leading whitespace for nested items)
 _UL_RE_LINE = re.compile(r"^\s+[-*+]\s")
 _OL_RE_LINE = re.compile(r"^\s+\d+\.\s")
+_UL_TOP_RE = re.compile(r"^[-*+]\s")
+_OL_TOP_RE = re.compile(r"^\d+\.\s")
 # Reference link pattern: [ref]: url "title"
-_REF_LINK_RE = re.compile(r"^\[\w+\]:\s")
+# Allow word characters plus '-' in the label (CommonMark labels are broader,
+# but this covers the common cases including hyphenated tags like [my-ref]).
+_REF_LINK_RE = re.compile(r"^\[[\w-]+\]:\s")
 
 
 def _is_list_continuation(line: str) -> bool:
     """Check if a line is a nested list item (indented -/*/+ or number.)."""
     return bool(_UL_RE_LINE.match(line) or _OL_RE_LINE.match(line))
+
+
+def _is_indented_text(line: str) -> bool:
+    """Indented non-blank line (a paragraph continuation inside a list item)."""
+    return bool(line) and line[0] in (" ", "\t") and bool(line.strip())
+
+
+def _list_resumes_after_blank(
+    lines: list[str], i: int, marker_re: re.Pattern[str]
+) -> int | None:
+    """Look past blank lines starting at *i*.
+
+    Returns the index of the next non-blank line if it continues the current
+    list block (another list marker or an indented continuation paragraph),
+    or ``None`` if the list ends. ``marker_re`` matches the top-level marker
+    type of the list we are currently inside.
+    """
+    j = i + 1
+    while j < len(lines) and not lines[j].strip():
+        j += 1
+    if j >= len(lines):
+        return None
+    nl = lines[j]
+    if marker_re.match(nl) or _is_list_continuation(nl) or _is_indented_text(nl):
+        return j
+    return None
 
 
 def detect_markdown_blocks(text: str) -> list[MarkdownBlock]:
@@ -88,28 +115,44 @@ def detect_markdown_blocks(text: str) -> list[MarkdownBlock]:
             continue
 
         # --- unordered list (top-level or nested) ---
-        if re.match(r"^[-*+]\s", line):
+        if _UL_TOP_RE.match(line):
             start = i
             i += 1
             while i < len(lines):
                 l = lines[i]
-                if re.match(r"^[-*+]\s", l) or _is_list_continuation(l):
+                if _UL_TOP_RE.match(l) or _is_list_continuation(l):
                     i += 1
                     continue
+                if _is_indented_text(l):
+                    i += 1
+                    continue
+                if not l.strip():
+                    resume = _list_resumes_after_blank(lines, i, _UL_TOP_RE)
+                    if resume is not None:
+                        i = resume
+                        continue
                 break
             block_text = "\n".join(lines[start:i])
             blocks.append(MarkdownBlock("list", block_text, preserved=True))
             continue
 
         # --- ordered list (top-level or nested) ---
-        if re.match(r"^\d+\.\s", line):
+        if _OL_TOP_RE.match(line):
             start = i
             i += 1
             while i < len(lines):
                 l = lines[i]
-                if re.match(r"^\d+\.\s", l) or _is_list_continuation(l):
+                if _OL_TOP_RE.match(l) or _is_list_continuation(l):
                     i += 1
                     continue
+                if _is_indented_text(l):
+                    i += 1
+                    continue
+                if not l.strip():
+                    resume = _list_resumes_after_blank(lines, i, _OL_TOP_RE)
+                    if resume is not None:
+                        i = resume
+                        continue
                 break
             block_text = "\n".join(lines[start:i])
             blocks.append(MarkdownBlock("olist", block_text, preserved=True))
