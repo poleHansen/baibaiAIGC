@@ -1,0 +1,32 @@
+# Deai (降AIGC) service — drop-in Docker Compose configuration.
+#
+# Usage:
+#   docker compose -f docker-compose.deai.yml up -d
+#
+# Or merge into an existing docker-compose.yml by copying the `services.deai` block.
+#
+# The service exposes port 8000 and provides:
+#   GET  /health              — health check
+#   POST /api/deai/process    — run the deai pipeline on text/Markdown input
+
+services:
+  deai:
+    build:
+      context: .
+      dockerfile: Dockerfile.deai
+    container_name: deai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM API configuration (can also be passed per-request in the JSON body).
+      # BAIBAIAIGC_API_KEY: "${DEAI_API_KEY:-}"
+      # BAIBAIAIGC_MODEL: "${DEAI_MODEL:-}"
+      # BAIBAIAIGC_BASE_URL: "${DEAI_BASE_URL:-}"
+      PORT: "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
