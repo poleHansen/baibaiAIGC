@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { AppService, PickedDocument } from "./appService";
+import type { AppService, PickedDocument, ReduceTextResult } from "./appService";
 import { normalizeModelConfig } from "../types/app";
 import type {
   DeleteHistoryResult,
@@ -103,5 +103,13 @@ export const desktopService: AppService = {
       throw new Error("Export cancelled");
     }
     return invoke<ExportResult>("export_round_output", { outputPath, exportPath, targetFormat });
+  },
+
+  async startReduceText(_text: string, _modelConfig: ModelConfig): Promise<string | null> {
+    return null;
+  },
+
+  async awaitReduceText(_runToken?: string | null): Promise<ReduceTextResult> {
+    throw new Error("reduceText is not supported in desktop mode. Please use the web interface.");
   },
 };

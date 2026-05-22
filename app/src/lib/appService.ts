@@ -18,6 +18,11 @@ export type PickedDocument = {
   displayName: string;
 };
 
+export type ReduceTextResult = {
+  reduceText: string;
+  outputPath?: string;
+};
+
 export interface AppService {
   loadModelConfig(): Promise<ModelConfig>;
   saveModelConfig(config: ModelConfig): Promise<ModelConfig>;
@@ -35,4 +40,6 @@ export interface AppService {
   readOutputPreview(outputPath: string, manifestPath: string): Promise<OutputPreview>;
   readSourcePreview(inputPath: string, manifestPath: string, promptProfile: "cn" | "en"): Promise<OutputPreview>;
   exportRound(outputPath: string, targetFormat: "txt" | "docx"): Promise<ExportResult>;
+  startReduceText(text: string, modelConfig: ModelConfig): Promise<string | null>;
+  awaitReduceText(runToken?: string | null): Promise<ReduceTextResult>;
 }

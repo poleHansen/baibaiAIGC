@@ -1,4 +1,4 @@
-import type { AppService, PickedDocument } from "./appService";
+import type { AppService, PickedDocument, ReduceTextResult } from "./appService";
 import { normalizeModelConfig } from "../types/app";
 import type {
   DeleteHistoryResult,
@@ -24,12 +24,19 @@ type RunStream = {
   close: () => void;
 };
 
+type ReduceTextStream = {
+  progressListeners: Set<ProgressListener>;
+  resultPromise: Promise<ReduceTextResult>;
+  close: () => void;
+};
+
 type UploadDocumentResponse = PickedDocument & {
   conflict?: boolean;
   reused?: boolean;
 };
 
 const runStreams = new Map<string, RunStream>();
+const reduceTextStreams = new Map<string, ReduceTextStream>();
 
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${WEB_API_BASE}${input}`, {
@@ -174,6 +181,83 @@ function getRunStream(runToken: string): RunStream {
   }
   const stream = createRunStream(runToken);
   runStreams.set(runToken, stream);
+  return stream;
+}
+
+function createReduceTextStream(runToken: string): ReduceTextStream {
+  let closed = false;
+  let settled = false;
+  let resolveResult!: (value: ReduceTextResult) => void;
+  let rejectResult!: (reason: Error) => void;
+
+  const progressListeners = new Set<ProgressListener>();
+  const eventSource = new EventSource(`${WEB_API_BASE}/api/run-round-events/${runToken}`);
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    eventSource.close();
+    reduceTextStreams.delete(runToken);
+  };
+
+  const settleResult = (value: ReduceTextResult) => {
+    if (settled) return;
+    settled = true;
+    resolveResult(value);
+    close();
+  };
+
+  const settleError = (message: string) => {
+    if (settled) return;
+    settled = true;
+    rejectResult(new Error(message));
+    close();
+  };
+
+  const resultPromise = new Promise<ReduceTextResult>((resolve, reject) => {
+    resolveResult = resolve;
+    rejectResult = reject as (reason: Error) => void;
+  });
+
+  eventSource.addEventListener("progress", (event) => {
+    try {
+      const payload = parseMessageEvent<RoundProgress>(event, "Invalid progress event.");
+      progressListeners.forEach((listener) => listener(payload));
+    } catch (error) {
+      settleError(error instanceof Error ? error.message : "Invalid progress event.");
+    }
+  });
+
+  eventSource.addEventListener("result", (event) => {
+    try {
+      settleResult(parseMessageEvent<ReduceTextResult>(event, "Invalid reduce text result."));
+    } catch (error) {
+      settleError(error instanceof Error ? error.message : "Invalid reduce text result.");
+    }
+  });
+
+  eventSource.addEventListener("error", (event) => {
+    if (!(event instanceof MessageEvent) || typeof event.data !== "string") return;
+    try {
+      const payload = JSON.parse(event.data) as { message?: string };
+      settleError(payload.message || "Reduce text failed.");
+    } catch {
+      settleError("Reduce text failed.");
+    }
+  });
+
+  eventSource.onerror = () => {
+    settleError("Progress channel disconnected.");
+  };
+
+  return { progressListeners, resultPromise, close };
+}
+
+function getReduceTextStream(runToken: string): ReduceTextStream {
+  const existing = reduceTextStreams.get(runToken);
+  if (existing) return existing;
+  const stream = createReduceTextStream(runToken);
+  reduceTextStreams.set(runToken, stream);
   return stream;
 }
 
@@ -337,5 +421,20 @@ export const webService: AppService = {
       format: targetFormat,
       path: filename,
     };
+  },
+
+  async startReduceText(text: string, modelConfig: ModelConfig): Promise<string | null> {
+    const { runId } = await requestJson<{ runId: string }>("/api/reduce-text", {
+      method: "POST",
+      body: JSON.stringify({ text, modelConfig: normalizeModelConfig(modelConfig) }),
+    });
+    return runId;
+  },
+
+  async awaitReduceText(runToken?: string | null): Promise<ReduceTextResult> {
+    if (!runToken) {
+      throw new Error("runToken is required in web mode.");
+    }
+    return getReduceTextStream(runToken).resultPromise;
   },
 };

@@ -8,7 +8,8 @@ export type RoundProgressPhase =
   | "chunk-error"
   | "chunk-complete"
   | "restoring-output"
-  | "stopped";
+  | "stopped"
+  | "reduce-round-start";
 
 export type ModelConfig = {
   baseUrl: string;
@@ -47,6 +48,7 @@ export function normalizeModelConfig(config?: Partial<ModelConfig> | null): Mode
 export type RoundProgress = {
   phase: RoundProgressPhase;
   round: number;
+  totalRounds?: number;
   currentChunk?: number;
   totalChunks?: number;
   completedChunks?: number;

@@ -9,7 +9,7 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, request, send_file, stream_with_context
 
-from aigc_round_service import normalize_path
+from aigc_round_service import MAX_ROUNDS, normalize_path
 from app_config import load_app_config, save_app_config
 from app_service import (
     delete_document_history,
@@ -148,6 +148,38 @@ def run_round_async(run_id: str, source_path: str, model_config: dict[str, Any],
             execution_options=execution_options,
         )
         finalize_progress(run_id, result=result)
+    except Exception as exc:
+        finalize_progress(run_id, error=str(exc))
+
+
+def reduce_text_async(run_id: str, source_path: str, model_config: dict[str, Any]) -> None:
+    try:
+        def capture_progress(event: dict[str, Any]) -> None:
+            append_progress_event(run_id, event)
+
+        prompt_profile = str(model_config.get("promptProfile", "cn") or "cn")
+        max_rounds = MAX_ROUNDS if prompt_profile == "cn" else 1
+        last_output_text = ""
+
+        for round_num in range(1, max_rounds + 1):
+            append_progress_event(run_id, {
+                "phase": "reduce-round-start",
+                "round": round_num,
+                "totalRounds": max_rounds,
+                "message": f"开始第 {round_num}/{max_rounds} 轮降 AIGC 处理",
+            })
+            result = run_round_for_app(
+                source_path,
+                model_config,
+                progress_callback=capture_progress,
+            )
+            output_path = Path(str(result["outputPath"]))
+            last_output_text = output_path.read_text(encoding="utf-8")
+
+        finalize_progress(run_id, result={
+            "reduceText": last_output_text,
+            "outputPath": str(result.get("outputPath", "")),
+        })
     except Exception as exc:
         finalize_progress(run_id, error=str(exc))
 
@@ -336,6 +368,30 @@ def post_request_stop() -> tuple[Response, int] | Response:
         source_path = require_managed_source_path(str(payload.get("sourcePath", "")).strip())
         prompt_profile = str(payload.get("promptProfile", "cn") or "cn")
         return jsonify(request_stop_for_app(source_path, prompt_profile=prompt_profile))
+    except Exception as exc:
+        return error_response(str(exc))
+
+
+@app.route("/api/reduce-text", methods=["POST"])
+def post_reduce_text() -> tuple[Response, int] | Response:
+    try:
+        payload = request.get_json(silent=True) or {}
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            raise ValueError("text is required.")
+        model_config = payload.get("modelConfig")
+        if not isinstance(model_config, dict):
+            raise ValueError("modelConfig is required.")
+        source_path = import_chat_text_attachment("paste_input.txt", text)
+        run_id = uuid.uuid4().hex
+        RUN_STATES[run_id] = ProgressState()
+        worker = threading.Thread(
+            target=reduce_text_async,
+            args=(run_id, str(source_path), model_config),
+            daemon=True,
+        )
+        worker.start()
+        return jsonify({"runId": run_id}), 202
     except Exception as exc:
         return error_response(str(exc))
 

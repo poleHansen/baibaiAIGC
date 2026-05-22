@@ -3,6 +3,7 @@ import { DocumentCard } from "./components/DocumentCard";
 import { HistoryCard } from "./components/HistoryCard";
 import { ModelConfigCard } from "./components/ModelConfigCard";
 import { ResultCard } from "./components/ResultCard";
+import { TextReduceCard } from "./components/TextReduceCard";
 import { useAppState, type ActivePreview } from "./hooks/useAppState";
 import type { AppService } from "./lib/appService";
 import type {
@@ -19,10 +20,11 @@ type Props = {
   pickerLabel?: string;
 };
 
-type PageKey = "workspace" | "history" | "result";
+type PageKey = "workspace" | "history" | "result" | "reduce-text";
 
 const PAGE_META: Array<{ key: PageKey; title: string; description: string }> = [
   { key: "workspace", title: "文档工作台", description: "模型设置、导入文档和整轮续跑" },
+  { key: "reduce-text", title: "直接降AIGC", description: "粘贴AI生成文本，直接输出降重结果" },
   { key: "history", title: "历史记录", description: "查看轮次结果、修订版与导出记录" },
   { key: "result", title: "预览", description: "按段落选择后生成修订版或下一轮局部处理" },
 ];
@@ -53,6 +55,9 @@ function formatRuntimeStep(progress: RoundProgress | null, fallback: string): st
   }
   if (progress.phase === "stopped") {
     return progress.message || `第 ${progress.round} 轮已停止，可从当前进度继续`;
+  }
+  if (progress.phase === "reduce-round-start") {
+    return progress.message || `开始第 ${progress.round}/${progress.totalRounds} 轮降 AIGC 处理`;
   }
   return fallback;
 }
@@ -124,7 +129,10 @@ function buildDisplayNameMap(items: HistoryDocumentSummary[], currentDocId: stri
 
 export function App({ service, pickerLabel }: Props) {
   const progressUnlistenRef = useRef<null | (() => void)>(null);
+  const reduceTextUnlistenRef = useRef<null | (() => void)>(null);
   const [stopBusy, setStopBusy] = useState(false);
+  const [reduceTextInput, setReduceTextInput] = useState("");
+  const [reduceTextOutput, setReduceTextOutput] = useState("");
   const [currentPage, setCurrentPage] = useState<PageKey>("workspace");
   const {
     modelConfig,
@@ -174,6 +182,8 @@ export function App({ service, pickerLabel }: Props) {
     return () => {
       progressUnlistenRef.current?.();
       progressUnlistenRef.current = null;
+      reduceTextUnlistenRef.current?.();
+      reduceTextUnlistenRef.current = null;
     };
   }, []);
 
@@ -491,6 +501,59 @@ export function App({ service, pickerLabel }: Props) {
     await executeRound(null);
   }
 
+  async function handleReduceText() {
+    if (!reduceTextInput.trim()) {
+      setNotice("请先粘贴需要降AIGC的文本。");
+      return;
+    }
+    try {
+      setBusy(true);
+      setError("");
+      setNotice("");
+      setProgress(null);
+      setReduceTextOutput("");
+      reduceTextUnlistenRef.current?.();
+      const runToken = await service.startReduceText(reduceTextInput, modelConfig);
+      reduceTextUnlistenRef.current = await service.listenRoundProgress((nextProgress) => {
+        setProgress(nextProgress);
+        if (nextProgress.phase === "reduce-round-start") {
+          setRuntimeStep(nextProgress.message || `开始第 ${nextProgress.round} 轮降 AIGC 处理`);
+        } else {
+          setRuntimeStep(formatRuntimeStep(nextProgress, "降AIGC处理中"));
+        }
+        if (nextProgress.phase === "chunk-error") {
+          setNotice(nextProgress.error || "本轮已暂停，请检查网络或模型接口。");
+        }
+        if (nextProgress.phase === "stopped") {
+          setNotice(nextProgress.message || "已停止，当前进度已保留。");
+        }
+      }, runToken);
+      setRuntimeStep("正在降AIGC，等待结果...");
+      const result = await service.awaitReduceText(runToken);
+      reduceTextUnlistenRef.current?.();
+      reduceTextUnlistenRef.current = null;
+      setProgress(null);
+      setReduceTextOutput(result.reduceText);
+      setRuntimeStep("降AIGC处理完成");
+      setNotice("文本降AIGC处理完成，可复制结果。");
+    } catch (appError) {
+      reduceTextUnlistenRef.current?.();
+      reduceTextUnlistenRef.current = null;
+      setProgress(null);
+      setError(String(appError));
+      setRuntimeStep("降AIGC处理失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleCopyReduceText() {
+    if (!reduceTextOutput) return;
+    navigator.clipboard.writeText(reduceTextOutput)
+      .then(() => setNotice("结果已复制到剪贴板。"))
+      .catch(() => setNotice("复制失败，请手动复制。"));
+  }
+
   async function handleHistoryDownload(item: HistoryRound | HistoryRevision, targetFormat: "txt" | "docx") {
     if (!item.outputPath) {
       setNotice("当前历史记录没有可导出的输出路径。");
@@ -681,6 +744,17 @@ export function App({ service, pickerLabel }: Props) {
               progressStatusLabel={documentStatus ? describeProgressStatus(documentStatus.progressStatus) : "未开始"}
             />
           </div>
+        ) : null}
+
+        {currentPage === "reduce-text" ? (
+          <TextReduceCard
+            inputText={reduceTextInput}
+            outputText={reduceTextOutput}
+            busy={busy}
+            onInputChange={setReduceTextInput}
+            onReduce={handleReduceText}
+            onCopy={handleCopyReduceText}
+          />
         ) : null}
 
         {currentPage === "history" ? (
