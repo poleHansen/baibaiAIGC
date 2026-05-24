@@ -35,6 +35,7 @@ struct ModelConfig {
     model: String,
     api_type: String,
     temperature: f64,
+    concurrency: i32,
     offline_mode: bool,
     prompt_profile: String,
 }

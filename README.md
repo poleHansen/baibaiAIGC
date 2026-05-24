@@ -140,6 +140,7 @@ Web 模式下可完成以下操作：
 
 - 上传 `.txt` 或 `.docx` 文件后自动保存到 `origin/chat-uploads/`
 - 配置并测试模型连接
+- 配置每轮分块处理的并发数
 - 按当前记录继续执行第 1 轮或第 2 轮
 - 读取历史输出并导出 `.txt` 或 `.docx` 到 `finish/web_exports/`
 

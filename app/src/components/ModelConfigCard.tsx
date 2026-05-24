@@ -12,7 +12,7 @@ type Props = {
 export function ModelConfigCard({ value, busy, onChange, onSave, onTestConnection }: Props) {
   function handleTextField<K extends keyof ModelConfig>(key: K) {
     return (event: ChangeEvent<HTMLInputElement>) => {
-      const nextValue = key === "temperature" ? Number(event.target.value) : event.target.value;
+      const nextValue = key === "temperature" || key === "concurrency" ? Number(event.target.value) : event.target.value;
       onChange({ ...value, [key]: nextValue });
     };
   }
@@ -76,6 +76,17 @@ export function ModelConfigCard({ value, busy, onChange, onSave, onTestConnectio
           step="0.1"
           value={value.temperature}
           onChange={handleTextField("temperature")}
+        />
+      </label>
+      <label className="field">
+        <span>并发数</span>
+        <input
+          type="number"
+          min="1"
+          max="16"
+          step="1"
+          value={value.concurrency}
+          onChange={handleTextField("concurrency")}
         />
       </label>
       <label className="toggle-field">

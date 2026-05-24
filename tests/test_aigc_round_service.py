@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import threading
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -346,6 +348,46 @@ class RunRoundRetryTests(unittest.TestCase):
         self.assertIn("第一段", output_text)
         self.assertIn("第二段", output_text)
         self.assertIn("已改写", output_text)
+
+    def test_concurrency_runs_multiple_chunks_at_once_and_restores_output(self) -> None:
+        temp_path = self.make_temp_dir()
+        input_path = temp_path / "input.txt"
+        output_path = temp_path / "output.txt"
+        manifest_path = temp_path / "manifest.json"
+        input_path.write_text("第一段。\n\n第二段。\n\n第三段。", encoding="utf-8")
+
+        active_count = 0
+        max_active_count = 0
+        lock = threading.Lock()
+
+        def transform(chunk_text: str, __: str, ___: int, ____: str) -> str:
+            nonlocal active_count, max_active_count
+            with lock:
+                active_count += 1
+                max_active_count = max(max_active_count, active_count)
+            time.sleep(0.03)
+            with lock:
+                active_count -= 1
+            return f"{chunk_text} 已改写"
+
+        with patch("aigc_round_service.update_round", return_value={"ok": True}):
+            result = run_round(
+                doc_id="tests/concurrency.txt",
+                round_number=1,
+                input_path=input_path,
+                output_path=output_path,
+                manifest_path=manifest_path,
+                transform=transform,
+                concurrency=2,
+            )
+
+        self.assertEqual(result["completed_chunk_count"], 3)
+        self.assertEqual(result["concurrency"], 2)
+        self.assertGreaterEqual(max_active_count, 2)
+        self.assertEqual(
+            output_path.read_text(encoding="utf-8"),
+            "第一段。 已改写\n\n第二段。 已改写\n\n第三段。 已改写",
+        )
 
 
 if __name__ == "__main__":
