@@ -16,6 +16,7 @@ export type ModelConfig = {
   model: string;
   apiType: ApiType;
   temperature: number;
+  concurrency: number;
   offlineMode: boolean;
   promptProfile: PromptProfile;
 };
@@ -26,6 +27,7 @@ export const DEFAULT_MODEL_CONFIG: ModelConfig = {
   model: "",
   apiType: "chat_completions",
   temperature: 0.7,
+  concurrency: 1,
   offlineMode: false,
   promptProfile: "cn",
 };
@@ -39,6 +41,9 @@ export function normalizeModelConfig(config?: Partial<ModelConfig> | null): Mode
     temperature: typeof config?.temperature === "number" && Number.isFinite(config.temperature)
       ? config.temperature
       : DEFAULT_MODEL_CONFIG.temperature,
+    concurrency: typeof config?.concurrency === "number" && Number.isFinite(config.concurrency)
+      ? Math.min(Math.max(Math.round(config.concurrency), 1), 16)
+      : DEFAULT_MODEL_CONFIG.concurrency,
     offlineMode: Boolean(config?.offlineMode),
     promptProfile: config?.promptProfile === "en" ? "en" : "cn",
   };
@@ -65,6 +70,7 @@ export type RoundProgress = {
   applyMode?: ApplyMode | "";
   targetParagraphIndexes?: number[];
   revisionNumber?: number;
+  concurrency?: number;
 };
 
 export type ApplyMode = "current_round_revision" | "next_round_partial";
@@ -136,6 +142,7 @@ export type RoundResult = {
   manifestPath: string;
   progressPath: string;
   chunkLimit: number;
+  concurrency: number;
   inputSegmentCount: number;
   outputSegmentCount: number;
   completedChunkCount: number;

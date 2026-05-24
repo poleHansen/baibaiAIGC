@@ -48,6 +48,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--api-type", default=None, help="API type: chat_completions or responses.")
     parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature for API mode.")
+    parser.add_argument("--concurrency", type=int, default=1, help="Maximum number of chunks to process at the same time.")
     parser.add_argument("--prompt-profile", default="cn", help="Prompt profile: cn or en.")
     parser.add_argument(
         "--echo-prompt-inputs",
@@ -106,6 +107,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         score_total=args.score_total,
         prompt_profile=args.prompt_profile,
         transform=transform,
+        concurrency=args.concurrency,
     )
     if debug_payload:
         result["prompt_inputs"] = debug_payload

@@ -16,6 +16,7 @@ DEFAULT_MODEL_CONFIG = {
     "model": "",
     "apiType": "chat_completions",
     "temperature": 0.7,
+    "concurrency": 1,
     "offlineMode": False,
     "promptProfile": "cn",
 }
@@ -41,6 +42,11 @@ def normalize_model_config(config: dict[str, Any] | None = None) -> dict[str, An
         temperature = float(payload.get("temperature", DEFAULT_MODEL_CONFIG["temperature"]))
     except (TypeError, ValueError):
         temperature = float(DEFAULT_MODEL_CONFIG["temperature"])
+    try:
+        concurrency = int(payload.get("concurrency", DEFAULT_MODEL_CONFIG["concurrency"]))
+    except (TypeError, ValueError):
+        concurrency = int(DEFAULT_MODEL_CONFIG["concurrency"])
+    concurrency = min(max(concurrency, 1), 16)
 
     return {
         "baseUrl": base_url,
@@ -48,6 +54,7 @@ def normalize_model_config(config: dict[str, Any] | None = None) -> dict[str, An
         "model": model,
         "apiType": normalize_api_type(str(payload.get("apiType", "") or ""), base_url),
         "temperature": temperature,
+        "concurrency": concurrency,
         "offlineMode": bool(payload.get("offlineMode", DEFAULT_MODEL_CONFIG["offlineMode"])),
         "promptProfile": normalize_prompt_profile(payload.get("promptProfile", DEFAULT_MODEL_CONFIG["promptProfile"])),
     }

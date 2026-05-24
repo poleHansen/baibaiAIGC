@@ -637,6 +637,7 @@ def run_round_for_app(
     model = str(normalized_config["model"])
     api_type = str(normalized_config["apiType"])
     temperature = float(normalized_config["temperature"])
+    concurrency = int(normalized_config["concurrency"])
     offline_mode = bool(normalized_config["offlineMode"])
     prompt_profile = str(normalized_config["promptProfile"])
 
@@ -716,6 +717,7 @@ def run_round_for_app(
             target_paragraph_indexes=context.target_paragraph_indexes,
             based_on_output_path=context.based_on_output_path,
             based_on_manifest_path=context.based_on_manifest_path,
+            concurrency=concurrency,
         )
     except (RoundPausedError, RoundStoppedError):
         progress = _read_progress_summary(str(context.manifest_path))
@@ -798,6 +800,7 @@ def run_round_for_app(
         "manifestPath": str(result["manifest_path"]),
         "progressPath": str(result["progress_path"]),
         "chunkLimit": int(result["chunk_limit"]),
+        "concurrency": int(result["concurrency"]),
         "inputSegmentCount": int(result["input_segment_count"]),
         "outputSegmentCount": int(result["output_segment_count"]),
         "completedChunkCount": int(result["completed_chunk_count"]),
