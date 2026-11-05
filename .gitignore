@@ -18,6 +18,9 @@ origin/
 .vscode/
 .agents/
 
+# Private deployment plan and skeleton (never commit)
+/deploy-plan/
+
 # OS junk
 .DS_Store
 Thumbs.db
