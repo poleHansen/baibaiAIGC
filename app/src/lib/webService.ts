@@ -1,4 +1,5 @@
 import type { AppService, PickedDocument } from "./appService";
+import { redirectToLogin } from "./session";
 import { normalizeModelConfig } from "../types/app";
 import type {
   DeleteHistoryResult,
@@ -41,6 +42,10 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      redirectToLogin();
+      throw new Error("登录已失效，请重新登录。");
+    }
     const errorPayload = (await response.json().catch(() => null)) as { message?: string } | null;
     throw new Error(errorPayload?.message || `Request failed: ${response.status}`);
   }
@@ -87,21 +92,30 @@ function parseMessageEvent<T>(event: Event, fallbackMessage: string): T {
   return JSON.parse(event.data) as T;
 }
 
+const MAX_RECONNECT_ATTEMPTS = 5;
+
 function createRunStream(runToken: string): RunStream {
   let closed = false;
   let settled = false;
+  let eventSource: EventSource | null = null;
+  let retryTimer: number | null = null;
+  let attempt = 0;
   let resolveResult!: (value: RoundResult) => void;
   let rejectResult!: (reason: Error) => void;
 
   const progressListeners = new Set<ProgressListener>();
-  const eventSource = new EventSource(`${WEB_API_BASE}/api/run-round-events/${runToken}`);
 
   const close = () => {
     if (closed) {
       return;
     }
     closed = true;
-    eventSource.close();
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    eventSource?.close();
+    eventSource = null;
     runStreams.delete(runToken);
   };
 
@@ -128,38 +142,70 @@ function createRunStream(runToken: string): RunStream {
     rejectResult = reject as (reason: Error) => void;
   });
 
-  eventSource.addEventListener("progress", (event) => {
-    try {
-      const payload = parseMessageEvent<RoundProgress>(event, "Invalid progress event.");
-      progressListeners.forEach((listener) => listener(payload));
-    } catch (error) {
-      settleError(error instanceof Error ? error.message : "Invalid progress event.");
-    }
-  });
-
-  eventSource.addEventListener("result", (event) => {
-    try {
-      settleResult(parseMessageEvent<RoundResult>(event, "Invalid run result."));
-    } catch (error) {
-      settleError(error instanceof Error ? error.message : "Invalid run result.");
-    }
-  });
-
-  eventSource.addEventListener("error", (event) => {
-    if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+  const connect = () => {
+    if (closed || settled) {
       return;
     }
-    try {
-      const payload = JSON.parse(event.data) as { message?: string };
-      settleError(payload.message || "Run round failed.");
-    } catch {
-      settleError("Run round failed.");
-    }
-  });
+    const source = new EventSource(`${WEB_API_BASE}/api/run-round-events/${runToken}`);
+    eventSource = source;
 
-  eventSource.onerror = () => {
-    settleError("Progress channel disconnected.");
+    source.addEventListener("progress", (event) => {
+      try {
+        const payload = parseMessageEvent<RoundProgress>(event, "Invalid progress event.");
+        progressListeners.forEach((listener) => listener(payload));
+      } catch (error) {
+        settleError(error instanceof Error ? error.message : "Invalid progress event.");
+      }
+    });
+
+    source.addEventListener("result", (event) => {
+      try {
+        settleResult(parseMessageEvent<RoundResult>(event, "Invalid run result."));
+      } catch (error) {
+        settleError(error instanceof Error ? error.message : "Invalid run result.");
+      }
+    });
+
+    // 后端主动推送的 event: error（带 data），与网络层的 onerror 不是一回事。
+    source.addEventListener("error", (event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      try {
+        const payload = JSON.parse(event.data) as { message?: string };
+        settleError(payload.message || "Run round failed.");
+      } catch {
+        settleError("Run round failed.");
+      }
+    });
+
+    source.onopen = () => {
+      attempt = 0;
+    };
+
+    // 网络抖动时按退避重连，避免用户刷新页面才能恢复进度。
+    source.onerror = () => {
+      if (closed || settled) {
+        return;
+      }
+      source.close();
+      if (eventSource === source) {
+        eventSource = null;
+      }
+      if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+        settleError("进度通道连续断开，请刷新页面后重试。");
+        return;
+      }
+      const delay = Math.min(1000 * 2 ** attempt, 15000);
+      attempt += 1;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, delay);
+    };
   };
+
+  connect();
 
   return {
     progressListeners,
@@ -353,6 +399,10 @@ export const webService: AppService = {
       `${WEB_API_BASE}/api/export-round?${query.toString()}`,
     );
     if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+        throw new Error("登录已失效，请重新登录。");
+      }
       throw new Error(`Export failed: ${response.status}`);
     }
     const blob = await response.blob();

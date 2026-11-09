@@ -5,6 +5,7 @@ import { ModelConfigCard } from "./components/ModelConfigCard";
 import { ResultCard } from "./components/ResultCard";
 import { useAppState, type ActivePreview } from "./hooks/useAppState";
 import type { AppService } from "./lib/appService";
+import { loadSession, type SessionInfo } from "./lib/session";
 import type {
   ApplyMode,
   HistoryDocumentSummary,
@@ -148,6 +149,7 @@ export function App({ service, pickerLabel }: Props) {
   const [stopBusy, setStopBusy] = useState(false);
   const [currentPage, setCurrentPage] = useState<PageKey>("workspace");
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [session, setSession] = useState<SessionInfo | null>(null);
   const {
     modelConfig,
     documentStatus,
@@ -179,6 +181,11 @@ export function App({ service, pickerLabel }: Props) {
   } = useAppState();
   const displayNameMap = buildDisplayNameMap(historyItems, documentStatus?.docId ?? null, documentStatus?.displayName ?? null);
   const currentDisplayName = documentStatus ? (displayNameMap.get(documentStatus.docId) || documentStatus.displayName || documentStatus.docId) : undefined;
+
+  useEffect(() => {
+    // 独立自部署时没有 /api/me，返回 null，界面保持原样。
+    loadSession().then(setSession);
+  }, []);
 
   useEffect(() => {
     service.loadModelConfig()
@@ -683,6 +690,12 @@ export function App({ service, pickerLabel }: Props) {
             <span>当前页面</span>
             <strong>{activePage.title}</strong>
           </div>
+          {session ? (
+            <div className="session-bar">
+              <span className="session-email" title={session.email}>{session.email}</span>
+              <a className="session-link" href="/auth/logout">退出登录</a>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -724,6 +737,7 @@ export function App({ service, pickerLabel }: Props) {
             <ModelConfigCard
               value={modelConfig}
               busy={busy}
+              platformMode={session?.platformMode ?? false}
               availableModels={availableModels}
               onChange={setModelConfig}
               onFetchModels={handleFetchModels}

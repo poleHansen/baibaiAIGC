@@ -154,6 +154,30 @@ select {
   font-size: 13px;
 }
 
+.session-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #7b7f87;
+}
+
+.session-email {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-link {
+  color: #0f6bdc;
+  text-decoration: none;
+}
+
+.session-link:hover {
+  text-decoration: underline;
+}
+
 .status-tag,
 .pill {
   display: inline-flex;
