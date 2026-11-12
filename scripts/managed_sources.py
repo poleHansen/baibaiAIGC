@@ -5,17 +5,20 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from workspace_paths import origin_dir
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-ORIGIN_DIR = ROOT_DIR / "origin"
-CHAT_UPLOADS_DIR = ORIGIN_DIR / "chat-uploads"
+
 SUPPORTED_MANAGED_SOURCE_SUFFIXES = {".txt", ".docx"}
 CHAT_UPLOAD_NAME_PATTERN = re.compile(r"^(?P<stem>.+?)_(?P<stamp>\d{8}_\d{6})(?:_(?P<counter>\d+))?$")
 
 
+def chat_uploads_dir() -> Path:
+    return origin_dir() / "chat-uploads"
+
+
 def ensure_managed_source_dirs() -> None:
-    ORIGIN_DIR.mkdir(parents=True, exist_ok=True)
-    CHAT_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    origin_dir().mkdir(parents=True, exist_ok=True)
+    chat_uploads_dir().mkdir(parents=True, exist_ok=True)
 
 
 def sanitize_filename(filename: str) -> str:
@@ -39,11 +42,11 @@ def build_chat_upload_path(filename: str, *, now: datetime | None = None) -> Pat
     suffix = validate_managed_source_suffix(safe_name)
     stamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
     stem = Path(safe_name).stem
-    candidate = CHAT_UPLOADS_DIR / f"{stem}_{stamp}{suffix}"
+    candidate = chat_uploads_dir() / f"{stem}_{stamp}{suffix}"
 
     counter = 2
     while candidate.exists():
-        candidate = CHAT_UPLOADS_DIR / f"{stem}_{stamp}_{counter}{suffix}"
+        candidate = chat_uploads_dir() / f"{stem}_{stamp}_{counter}{suffix}"
         counter += 1
     return candidate
 
@@ -71,7 +74,7 @@ def list_matching_chat_uploads(filename: str) -> list[Path]:
     validate_managed_source_suffix(target_name)
     matches = [
         candidate
-        for candidate in CHAT_UPLOADS_DIR.iterdir()
+        for candidate in chat_uploads_dir().iterdir()
         if candidate.is_file() and get_display_name_for_source(candidate) == target_name
     ]
     matches.sort(key=lambda candidate: (candidate.stat().st_mtime, candidate.name), reverse=True)

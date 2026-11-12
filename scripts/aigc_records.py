@@ -52,10 +52,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Paths are computed relative to this file: scripts/ -> workspace root.
-ROOT_DIR = Path(__file__).resolve().parents[1]
-FINISH_DIR = ROOT_DIR / "finish"
-RECORDS_PATH = FINISH_DIR / "aigc_records.json"
+from workspace_paths import finish_dir, get_data_root, records_path
+
 VALID_RECORD_STATUSES = {"in_progress", "interrupted", "completed"}
 
 
@@ -182,7 +180,7 @@ def _prune_record_dict(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _ensure_finish_dir() -> None:
-    FINISH_DIR.mkdir(parents=True, exist_ok=True)
+    finish_dir().mkdir(parents=True, exist_ok=True)
 
 
 def load_records() -> Dict[str, Any]:
@@ -191,10 +189,10 @@ def load_records() -> Dict[str, Any]:
     Returns an empty dict if the file does not exist or is empty.
     """
 
-    if not RECORDS_PATH.exists():
+    if not records_path().exists():
         return {}
     try:
-        raw = RECORDS_PATH.read_text(encoding="utf-8")
+        raw = records_path().read_text(encoding="utf-8")
     except OSError:
         return {}
     if not raw.strip():
@@ -214,7 +212,7 @@ def save_records(records: Dict[str, Any]) -> None:
 
     _ensure_finish_dir()
     text = json.dumps(records, ensure_ascii=False, indent=2, sort_keys=True)
-    RECORDS_PATH.write_text(text, encoding="utf-8")
+    records_path().write_text(text, encoding="utf-8")
 
 
 def normalize_record_path(path: str) -> str:
@@ -350,7 +348,7 @@ def _record_path_to_absolute(path: str) -> Optional[Path]:
         return None
     candidate = Path(normalized)
     if not candidate.is_absolute():
-        candidate = ROOT_DIR / candidate
+        candidate = get_data_root() / candidate
     return candidate.resolve()
 
 
@@ -374,7 +372,7 @@ def _collect_round_file_paths(rounds: List[Dict[str, Any]]) -> set[Path]:
 
 def _is_safe_generated_artifact(path: Path) -> bool:
     try:
-        relative = path.relative_to(ROOT_DIR)
+        relative = path.relative_to(get_data_root())
     except ValueError:
         return False
 
@@ -407,7 +405,7 @@ def _delete_artifacts_for_removed_rounds(
         if not candidate.exists() or not candidate.is_file():
             continue
         candidate.unlink()
-        removed_paths.append(str(candidate.relative_to(ROOT_DIR)).replace("\\", "/"))
+        removed_paths.append(str(candidate.relative_to(get_data_root())).replace("\\", "/"))
 
     return removed_paths
 

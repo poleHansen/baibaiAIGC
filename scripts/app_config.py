@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from aigc_round_service import normalize_prompt_profile
+from workspace_paths import get_data_root, has_data_root
 
 APP_DIR_NAME = "BaibaiAIGC"
 CONFIG_FILE_NAME = "config.json"
@@ -20,6 +21,8 @@ DEFAULT_MODEL_CONFIG = {
 
 
 def get_app_config_dir() -> Path:
+    if has_data_root():
+        return get_data_root()
     base_dir = os.getenv("APPDATA")
     if base_dir:
         return Path(base_dir) / APP_DIR_NAME
@@ -50,7 +53,7 @@ def normalize_model_config(config: dict[str, Any] | None = None) -> dict[str, An
     }
 
 
-def load_app_config() -> dict[str, Any]:
+def _load_raw_config() -> dict[str, Any]:
     path = get_app_config_path()
     if not path.exists():
         return dict(DEFAULT_MODEL_CONFIG)
@@ -69,9 +72,35 @@ def load_app_config() -> dict[str, Any]:
     return normalize_model_config(data)
 
 
-def save_app_config(config: dict[str, Any]) -> dict[str, Any]:
+def mask_api_key(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:3]}****{key[-4:]}"
+
+
+def load_app_config() -> dict[str, Any]:
+    config = _load_raw_config()
+    return {**config, "apiKey": mask_api_key(config["apiKey"])}
+
+
+def resolve_model_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized = normalize_model_config(config)
+    if "****" in normalized["apiKey"]:
+        saved_key = _load_raw_config()["apiKey"]
+        if not saved_key or normalized["apiKey"] != mask_api_key(saved_key):
+            raise ValueError("保存的模型密钥已变化，请重新加载设置或输入新的密钥。")
+        normalized["apiKey"] = saved_key
+    return normalized
+
+
+def save_app_config(config: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(config)
+    if not str(payload.get("apiKey", "")).strip():
+        payload["apiKey"] = _load_raw_config()["apiKey"]
+    normalized = resolve_model_config(payload)
     path = get_app_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
-    return normalized
+    return {**normalized, "apiKey": mask_api_key(normalized["apiKey"])}

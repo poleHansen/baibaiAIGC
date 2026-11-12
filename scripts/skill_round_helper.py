@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Callable
 
 from aigc_records import (
-    ROOT_DIR,
     get_round_record,
     load_records,
     normalize_record_status,
@@ -22,11 +21,11 @@ from aigc_round_service import (
     run_round,
 )
 from docx_pipeline import read_docx_text, render_docx_from_template
+from workspace_paths import intermediate_dir
 
 
 Transform = Callable[[str, str, int, str], str]
 ProgressCallback = Callable[[dict[str, object]], None]
-INTERMEDIATE_DIR = ROOT_DIR / "finish" / "intermediate"
 
 
 @dataclass
@@ -142,8 +141,8 @@ def build_round_context(source_path: Path | str, round_number: int | None = None
         extracted_from_docx = False
 
     stem = _doc_stem(doc_id)
-    output_text_path = INTERMEDIATE_DIR / f"{stem}_round{resolved_round}.txt"
-    manifest_path = INTERMEDIATE_DIR / f"{stem}_round{resolved_round}_manifest.json"
+    output_text_path = intermediate_dir() / f"{stem}_round{resolved_round}.txt"
+    manifest_path = intermediate_dir() / f"{stem}_round{resolved_round}_manifest.json"
     docx_output_path = _build_docx_output_path(normalized_source, stem, resolved_round)
 
     return RoundContext(
@@ -188,8 +187,8 @@ def ensure_skill_input_text(source_path: Path | str) -> tuple[Path, bool]:
         return normalized_source, False
 
     if suffix == ".docx":
-        INTERMEDIATE_DIR.mkdir(parents=True, exist_ok=True)
-        extracted_path = INTERMEDIATE_DIR / f"{normalized_source.stem}_extracted.txt"
+        intermediate_dir().mkdir(parents=True, exist_ok=True)
+        extracted_path = intermediate_dir() / f"{normalized_source.stem}_extracted.txt"
         extracted_path.write_text(read_docx_text(normalized_source), encoding="utf-8")
         return extracted_path, True
 
@@ -267,8 +266,8 @@ def _build_targeted_context(
             based_on_manifest_path=based_on_manifest_path,
             target_paragraph_indexes=target_paragraph_indexes,
         )
-        output_text_path = INTERMEDIATE_DIR / f"{_doc_stem(doc_id)}_round{target_round}_rev{revision_number}.txt"
-        manifest_path = INTERMEDIATE_DIR / f"{_doc_stem(doc_id)}_round{target_round}_rev{revision_number}_manifest.json"
+        output_text_path = intermediate_dir() / f"{_doc_stem(doc_id)}_round{target_round}_rev{revision_number}.txt"
+        manifest_path = intermediate_dir() / f"{_doc_stem(doc_id)}_round{target_round}_rev{revision_number}_manifest.json"
         return RoundContext(
             doc_id=doc_id,
             prompt_profile=normalized_prompt_profile,
@@ -303,8 +302,8 @@ def _build_targeted_context(
     if target_round_record is not None:
         raise ValueError(f"Round {target_round} already exists for document: {doc_id}")
 
-    output_text_path = INTERMEDIATE_DIR / f"{_doc_stem(doc_id)}_round{target_round}.txt"
-    manifest_path = INTERMEDIATE_DIR / f"{_doc_stem(doc_id)}_round{target_round}_manifest.json"
+    output_text_path = intermediate_dir() / f"{_doc_stem(doc_id)}_round{target_round}.txt"
+    manifest_path = intermediate_dir() / f"{_doc_stem(doc_id)}_round{target_round}_manifest.json"
     return RoundContext(
         doc_id=doc_id,
         prompt_profile=normalized_prompt_profile,
@@ -385,7 +384,7 @@ def _resolve_revision_number(
                     max_revision = max(max_revision, int(revision["revision_number"]))
 
     stem = _doc_stem(doc_id)
-    for manifest_path in INTERMEDIATE_DIR.glob(f"{stem}_round{round_number}_rev*_manifest.json"):
+    for manifest_path in intermediate_dir().glob(f"{stem}_round{round_number}_rev*_manifest.json"):
         revision_number = _extract_revision_number_from_manifest(manifest_path)
         if revision_number is not None:
             max_revision = max(max_revision, revision_number)
@@ -401,7 +400,7 @@ def _find_matching_incomplete_revision(
     target_paragraph_indexes: list[int],
 ) -> int | None:
     stem = _doc_stem(doc_id)
-    for manifest_path in INTERMEDIATE_DIR.glob(f"{stem}_round{round_number}_rev*_manifest.json"):
+    for manifest_path in intermediate_dir().glob(f"{stem}_round{round_number}_rev*_manifest.json"):
         revision_number = _extract_revision_number_from_manifest(manifest_path)
         if revision_number is None:
             continue
@@ -511,7 +510,7 @@ def _build_docx_output_path(
     if source_path.suffix.lower() != ".docx":
         return None
     revision_suffix = f"_rev{revision_number}" if revision_number is not None else ""
-    return INTERMEDIATE_DIR / f"{stem}_round{round_number}{revision_suffix}.docx"
+    return intermediate_dir() / f"{stem}_round{round_number}{revision_suffix}.docx"
 
 
 def _get_rounds(doc_id: str) -> list[dict]:

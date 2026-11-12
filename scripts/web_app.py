@@ -26,7 +26,6 @@ from app_service import (
     test_model_connection,
 )
 from managed_sources import (
-    ORIGIN_DIR,
     ensure_managed_source_dirs,
     find_latest_matching_chat_upload,
     get_display_name_for_source,
@@ -34,11 +33,9 @@ from managed_sources import (
     import_chat_text_attachment,
     sanitize_filename,
 )
+from workspace_paths import finish_dir, origin_dir, web_export_dir
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-FINISH_DIR = ROOT_DIR / "finish"
-EXPORT_DIR = FINISH_DIR / "web_exports"
 ALLOWED_WEB_ORIGINS = {
     "http://localhost:1420",
     "http://127.0.0.1:1420",
@@ -60,7 +57,7 @@ app = Flask(__name__)
 
 def ensure_workspace_dirs() -> None:
     ensure_managed_source_dirs()
-    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    web_export_dir().mkdir(parents=True, exist_ok=True)
 
 
 def error_response(message: str, status: int = 400) -> tuple[Response, int]:
@@ -75,21 +72,21 @@ def _is_within(path: Path, root: Path) -> bool:
 
 def require_managed_source_path(path_value: str) -> str:
     normalized_path = normalize_path(Path(path_value))
-    if not _is_within(normalized_path, ORIGIN_DIR):
+    if not _is_within(normalized_path, origin_dir()):
         raise ValueError("sourcePath must stay within the managed origin directory.")
     return str(normalized_path)
 
 
 def require_managed_preview_input_path(path_value: str) -> str:
     normalized_path = normalize_path(Path(path_value))
-    if _is_within(normalized_path, ORIGIN_DIR) or _is_within(normalized_path, FINISH_DIR):
+    if _is_within(normalized_path, origin_dir()) or _is_within(normalized_path, finish_dir()):
         return str(normalized_path)
     raise ValueError("inputPath must stay within the managed origin or finish directory.")
 
 
 def require_managed_output_path(path_value: str) -> str:
     normalized_path = normalize_path(Path(path_value))
-    if not _is_within(normalized_path, FINISH_DIR):
+    if not _is_within(normalized_path, finish_dir()):
         raise ValueError("outputPath must stay within the managed finish directory.")
     return str(normalized_path)
 
@@ -370,7 +367,7 @@ def get_export_round() -> tuple[Response, int] | Response:
             else None
         )
         stem = Path(output_path).stem or "current-round"
-        export_path = EXPORT_DIR / f"{stem}.{target_format}"
+        export_path = web_export_dir() / f"{stem}.{target_format}"
         result = export_round_output(
             output_path,
             str(export_path),

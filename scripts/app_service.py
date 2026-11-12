@@ -16,15 +16,15 @@ from aigc_records import (
     update_round,
 )
 from aigc_round_service import MAX_ROUNDS, RoundPausedError, RoundStoppedError, build_progress_path, get_chunk_metric, normalize_path, request_stop, run_round
-from app_config import normalize_model_config
+from app_config import normalize_model_config, resolve_model_config
 from chunking import build_manifest, load_manifest, split_text_to_paragraphs
 from docx_pipeline import _split_text_into_blocks, render_docx_from_template, write_docx_text
 from llm_client import fetch_model_list, llm_completion, test_llm_connection
 from managed_sources import get_display_name_for_source
 from skill_round_helper import build_execution_context, build_round_context, ensure_skill_input_text, get_document_round_state
+from workspace_paths import get_data_root
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
@@ -421,7 +421,7 @@ def emit_error_payload(message: str) -> None:
 def import_document(source_path: str) -> dict[str, Any]:
     normalized_source = normalize_path(Path(source_path))
     try:
-        relative_doc_id = normalized_source.relative_to(ROOT_DIR)
+        relative_doc_id = normalized_source.relative_to(get_data_root())
         doc_id = normalize_doc_id(str(relative_doc_id).replace("\\", "/"))
     except ValueError:
         doc_id = normalize_doc_id(str(normalized_source))
@@ -456,7 +456,7 @@ def import_document(source_path: str) -> dict[str, Any]:
 def get_document_status(source_path: str, prompt_profile: str = "cn") -> dict[str, Any]:
     normalized_source = normalize_path(Path(source_path))
     try:
-        relative_doc_id = normalized_source.relative_to(ROOT_DIR)
+        relative_doc_id = normalized_source.relative_to(get_data_root())
         doc_id = normalize_doc_id(str(relative_doc_id).replace("\\", "/"))
     except ValueError:
         doc_id = normalize_doc_id(str(normalized_source))
@@ -596,7 +596,7 @@ def request_stop_for_app(source_path: str, prompt_profile: str = "cn") -> dict[s
 def get_document_history(source_path: str) -> dict[str, Any]:
     normalized_source = normalize_path(Path(source_path))
     try:
-        relative_doc_id = normalized_source.relative_to(ROOT_DIR)
+        relative_doc_id = normalized_source.relative_to(get_data_root())
         doc_id = normalize_doc_id(str(relative_doc_id).replace("\\", "/"))
     except ValueError:
         doc_id = normalize_doc_id(str(normalized_source))
@@ -644,7 +644,7 @@ def run_round_for_app(
     progress_callback: ProgressCallback | None = None,
     execution_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    normalized_config = normalize_model_config(model_config)
+    normalized_config = resolve_model_config(model_config)
     base_url = str(normalized_config["baseUrl"])
     api_key = str(normalized_config["apiKey"])
     model = str(normalized_config["model"])
@@ -841,7 +841,7 @@ def run_round_for_app(
 
 
 def test_model_connection(model_config: dict[str, Any]) -> dict[str, Any]:
-    normalized_config = normalize_model_config(model_config)
+    normalized_config = resolve_model_config(model_config)
     base_url = str(normalized_config["baseUrl"])
     api_key = str(normalized_config["apiKey"])
     model = str(normalized_config["model"])
@@ -869,7 +869,7 @@ def test_model_connection(model_config: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_model_list_for_app(model_config: dict[str, Any]) -> dict[str, Any]:
-    normalized_config = normalize_model_config(model_config)
+    normalized_config = resolve_model_config(model_config)
     base_url = str(normalized_config["baseUrl"])
     api_key = str(normalized_config["apiKey"])
     model = str(normalized_config["model"])
@@ -971,7 +971,7 @@ def relative_to_workspace_path(path_value: str) -> str:
         return ""
     normalized = normalize_path(Path(path_value))
     try:
-        return str(normalized.relative_to(ROOT_DIR)).replace("\\", "/")
+        return str(normalized.relative_to(get_data_root())).replace("\\", "/")
     except ValueError:
         return str(normalized)
 

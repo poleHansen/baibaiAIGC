@@ -5,8 +5,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
-from aigc_records import ROOT_DIR, update_round
+from aigc_records import update_round
 from chunking import DEFAULT_CHUNK_LIMIT, Chunk, ChunkManifest, build_manifest, restore_text_from_chunks, save_manifest
+from workspace_paths import get_code_root, get_data_root
 
 
 PROMPT_PROFILES = {
@@ -193,13 +194,13 @@ def detect_disallowed_answer_style_pattern(input_text: str, output_text: str) ->
 def normalize_path(path: Path) -> Path:
     if path.is_absolute():
         return path
-    return (ROOT_DIR / path).resolve()
+    return (get_data_root() / path).resolve()
 
 
 def relative_to_root(path: Path) -> str:
     normalized = normalize_path(path)
     try:
-        relative = normalized.relative_to(ROOT_DIR)
+        relative = normalized.relative_to(get_data_root())
         return str(relative).replace("\\", "/")
     except ValueError:
         return str(normalized)
@@ -233,7 +234,7 @@ def load_prompt(prompt_profile: str | None, round_number: int) -> str:
             f"Round {round_number} is not available for prompt profile {normalize_prompt_profile(prompt_profile)}. "
             f"Supported rounds: {sorted(prompts)}"
         )
-    prompt_path = ROOT_DIR / prompts[round_number]
+    prompt_path = get_code_root() / prompts[round_number]
     return prompt_path.read_text(encoding="utf-8")
 
 
