@@ -4,6 +4,7 @@ import type { RoundResult } from "../types/app";
 type Props = {
   result: RoundResult | null;
   activePreview: ActivePreview | null;
+  nextRound: number | null;
   selectedParagraphIndexes: number[];
   busy: boolean;
   onToggleParagraph: (paragraphIndex: number) => void;
@@ -31,6 +32,7 @@ function formatPreviewLabel(preview: ActivePreview): string {
 export function ResultCard({
   result,
   activePreview,
+  nextRound,
   selectedParagraphIndexes,
   busy,
   onToggleParagraph,
@@ -46,6 +48,7 @@ export function ResultCard({
   const selectedCount = selectedParagraphIndexes.length;
   const canRunSelection = Boolean(activePreview && selectedCount > 0 && !busy);
   const canCreateRevision = canRunSelection && !(activePreview?.kind === "round" && activePreview.round === 0);
+  const canRunNextPartial = canRunSelection && activePreview?.round !== undefined && activePreview.round + 1 === nextRound;
 
   return (
     <section className="glass-card section-stack result-card">
@@ -94,7 +97,7 @@ export function ResultCard({
             <button className="secondary-button" onClick={onCreateRevision} disabled={!canCreateRevision}>
               在当前轮生成修订版
             </button>
-            <button className="primary-button" onClick={onRunNextPartial} disabled={!canRunSelection}>
+            <button className="primary-button" onClick={onRunNextPartial} disabled={!canRunNextPartial}>
               在下一轮处理所选段落
             </button>
           </div>

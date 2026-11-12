@@ -38,3 +38,4 @@ dev-doc/
 
 /AGENTS.md
 tests
+app/round-preview.test.mjs

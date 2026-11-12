@@ -364,25 +364,39 @@ export function App({ service, pickerLabel }: Props) {
         setRuntimeStep("待命");
         return;
       }
-      const status = await refreshDocumentState(picked.sourcePath);
+      const [status, nextHistory] = await Promise.all([
+        service.getDocumentStatus(picked.sourcePath, modelConfig),
+        service.getDocumentHistory(picked.sourcePath),
+      ]);
+      setDocumentStatus(status);
+      setHistory(nextHistory);
       await refreshHistoryList();
-      const preview = await service.readSourcePreview(status.currentInputPath, status.manifestPath, modelConfig.promptProfile);
+      const latestRound = nextHistory.rounds
+        .filter((item) => item.status === "completed" && status.completedRounds.includes(item.round))
+        .sort((left, right) => right.round - left.round)[0];
+      if (latestRound) {
+        const preview = await service.readOutputPreview(latestRound.outputPath, latestRound.manifestPath);
+        setPreviewText(preview.text);
+        setActivePreview(buildActivePreviewFromVersion(`第 ${latestRound.round} 轮结果`, latestRound, status.sourcePath, preview));
+      } else {
+        const preview = await service.readSourcePreview(status.currentInputPath, status.manifestPath, modelConfig.promptProfile);
+        setPreviewText(preview.text);
+        setActivePreview({
+          label: "初始预览",
+          round: 0,
+          revisionNumber: null,
+          outputPath: status.currentInputPath,
+          manifestPath: status.manifestPath,
+          sourcePath: status.sourcePath,
+          docxOutputPath: "",
+          kind: "round",
+          sourceRound: 0,
+          preview,
+        });
+      }
       setCurrentPage("result");
       setHistoryPanelOpen(true);
       setRoundResult(null);
-      setPreviewText(preview.text);
-      setActivePreview({
-        label: "初始预览",
-        round: 0,
-        revisionNumber: null,
-        outputPath: status.currentInputPath,
-        manifestPath: status.manifestPath,
-        sourcePath: status.sourcePath,
-        docxOutputPath: "",
-        kind: "round",
-        sourceRound: 0,
-        preview,
-      });
       clearPreviewSelection();
       setRuntimeStep(
         status.hasNextRound && status.nextRound
@@ -642,6 +656,10 @@ export function App({ service, pickerLabel }: Props) {
     }
     const sourceRound = activePreview.round;
     const targetRound = applyMode === "current_round_revision" ? sourceRound : sourceRound + 1;
+    if (applyMode === "next_round_partial" && targetRound !== documentStatus?.nextRound) {
+      setNotice("此预览没有可执行的下一轮，请选择对应轮次的结果，或从工作台继续未完成任务。");
+      return null;
+    }
     return {
       applyMode,
       targetParagraphIndexes: selectedParagraphIndexes,
@@ -778,6 +796,7 @@ export function App({ service, pickerLabel }: Props) {
           <ResultCard
             result={roundResult}
             activePreview={activePreview}
+            nextRound={documentStatus?.nextRound ?? null}
             selectedParagraphIndexes={selectedParagraphIndexes}
             busy={busy}
             onToggleParagraph={toggleParagraph}
