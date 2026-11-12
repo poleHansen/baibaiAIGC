@@ -25,10 +25,13 @@ export async function loadSession(): Promise<SessionInfo | null> {
   }
 }
 
+let redirectingToLogin = false;
+
 export function redirectToLogin(): void {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || redirectingToLogin || window.location.pathname === "/login") {
     return;
   }
-  const next = `${window.location.pathname}${window.location.search}`;
-  window.location.href = `/login?next=${encodeURIComponent(next)}`;
+  redirectingToLogin = true;
+  const next = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.location.replace(`/login?next=${encodeURIComponent(next)}`);
 }

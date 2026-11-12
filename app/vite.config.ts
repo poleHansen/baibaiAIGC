@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => ({
     port: 1420,
     strictPort: true,
     proxy: {
-      "/api": {
+      "^/(api|auth|login|register|forgot-password|reset-password)(/|\\?|$)": {
         target: "http://127.0.0.1:8765",
         changeOrigin: true,
       },
