@@ -193,7 +193,7 @@ def detect_disallowed_answer_style_pattern(input_text: str, output_text: str) ->
 
 def normalize_path(path: Path) -> Path:
     if path.is_absolute():
-        return path
+        return path.resolve()
     return (get_data_root() / path).resolve()
 
 
