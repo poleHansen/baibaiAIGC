@@ -702,7 +702,7 @@ export function App({ service, pickerLabel }: Props) {
       <div className="hero-panel">
         <div className="hero-copy-wrap">
           <img className="brand-logo" src={brandLogo} alt="baibaiAIGC" />
-          <h1>段落级 AIGC 文稿处理工作台</h1>
+          <h1>baibaiAIGC</h1>
         </div>
         <div className="hero-status-column">
           <span className={`status-tag ${busy ? "" : "idle"}`}>
@@ -747,7 +747,6 @@ export function App({ service, pickerLabel }: Props) {
         {currentPage === "workspace" ? (
           <div className="page-frame-head">
             <div>
-              <p className="page-kicker">页面内容</p>
               <h2>{activePage.title}</h2>
             </div>
             <p>{activePage.description}</p>

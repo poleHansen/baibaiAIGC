@@ -316,13 +316,6 @@ select {
   font-size: 13px;
 }
 
-.page-kicker {
-  color: #0f6bdc;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
 .content-grid {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);
