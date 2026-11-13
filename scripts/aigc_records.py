@@ -47,14 +47,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import threading
+from functools import wraps
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from workspace_paths import finish_dir, get_data_root, records_path
+from workspace_paths import finish_dir, get_data_root, origin_dir, records_path
 
 VALID_RECORD_STATUSES = {"in_progress", "interrupted", "completed"}
+_records_lock = threading.RLock()
+
+
+def _locked_records(operation):
+    @wraps(operation)
+    def locked(*args, **kwargs):
+        with _records_lock:
+            return operation(*args, **kwargs)
+    return locked
 
 
 @dataclass
@@ -183,6 +195,7 @@ def _ensure_finish_dir() -> None:
     finish_dir().mkdir(parents=True, exist_ok=True)
 
 
+@_locked_records
 def load_records() -> Dict[str, Any]:
     """Load all AIGC records from the JSON file.
 
@@ -207,6 +220,7 @@ def load_records() -> Dict[str, Any]:
     return data
 
 
+@_locked_records
 def save_records(records: Dict[str, Any]) -> None:
     """Persist the records dictionary back to disk as JSON."""
 
@@ -334,6 +348,7 @@ def normalize_records(records: Dict[str, Any]) -> Dict[str, Any]:
     return normalized_records
 
 
+@_locked_records
 def load_records_normalized() -> Dict[str, Any]:
     raw_records = load_records()
     normalized_records = normalize_records(raw_records)
@@ -357,7 +372,7 @@ def _collect_round_file_paths(rounds: List[Dict[str, Any]]) -> set[Path]:
     for item in rounds:
         if not isinstance(item, dict):
             continue
-        for field in ("input_path", "output_path", "manifest_path", "docx_output_path"):
+        for field in ("input_path", "output_path", "manifest_path", "docx_output_path", "progress_path", "based_on_output_path", "based_on_manifest_path"):
             value = item.get(field)
             if not isinstance(value, str):
                 continue
@@ -410,6 +425,7 @@ def _delete_artifacts_for_removed_rounds(
     return removed_paths
 
 
+@_locked_records
 def update_round(
     doc_id: str,
     round_number: int,
@@ -515,6 +531,7 @@ def update_round(
     return doc_entry
 
 
+@_locked_records
 def update_revision(
     doc_id: str,
     round_number: int,
@@ -621,6 +638,7 @@ def update_revision(
     return doc_entry
 
 
+@_locked_records
 def set_docx_output_path(
     doc_id: str,
     round_number: int,
@@ -698,6 +716,7 @@ def list_records() -> Dict[str, Any]:
     return load_records_normalized()
 
 
+@_locked_records
 def delete_rounds(doc_id: str, from_round: int) -> Dict[str, Any]:
     normalized_doc_id = normalize_doc_id(doc_id)
     records = load_records_normalized()
@@ -741,18 +760,52 @@ def delete_rounds(doc_id: str, from_round: int) -> Dict[str, Any]:
     }
 
 
+def _collect_document_file_paths(doc_id: str, entry: Dict[str, Any]) -> set[Path]:
+    rounds = entry.get("rounds") if isinstance(entry.get("rounds"), list) else []
+    paths = _collect_round_file_paths(rounds)
+    source = _record_path_to_absolute(str(entry.get("origin_path") or doc_id))
+    if source is None:
+        return paths
+    if source.is_relative_to(origin_dir().resolve()):
+        paths.add(source)
+    for path in list(paths):
+        if path.suffix.lower() in {".txt", ".docx"} and (path == source or _is_safe_generated_artifact(path)):
+            for suffix in (".txt", ".docx"):
+                paths.add((finish_dir() / "web_exports" / f"{path.stem}{suffix}").resolve())
+    # 导出和未完成轮次可能未进入记录，只匹配本应用实际生成的完整文件名。
+    pattern = re.compile(
+        rf"{re.escape(source.stem)}_(?:extracted\.(?:txt|docx)|round\d+(?:_rev\d+)?"
+        rf"(?:\.(?:txt|docx)|_(?:manifest|progress|stop)\.json))"
+    )
+    for directory in (finish_dir() / "intermediate", finish_dir() / "web_exports"):
+        if directory.is_dir():
+            paths.update(path.resolve() for path in directory.iterdir() if pattern.fullmatch(path.name))
+    return paths
+
+
+@_locked_records
 def delete_document(doc_id: str) -> Dict[str, Any]:
     normalized_doc_id = normalize_doc_id(doc_id)
     records = load_records_normalized()
-    doc_entry = records.pop(normalized_doc_id, None)
+    doc_entry = records.get(normalized_doc_id)
     if not isinstance(doc_entry, dict):
         raise ValueError(f"Document record not found: {normalized_doc_id}")
+    source = _record_path_to_absolute(str(doc_entry.get("origin_path") or normalized_doc_id))
+    retained_paths: set[Path] = set()
+    for other_id, entry in records.items():
+        if other_id != normalized_doc_id and isinstance(entry, dict):
+            retained_paths.update(_collect_document_file_paths(other_id, entry))
+    removed_files = []
+    for path in sorted(_collect_document_file_paths(normalized_doc_id, doc_entry) - retained_paths):
+        is_source = path == source and path.is_relative_to(origin_dir().resolve())
+        if not is_source and not _is_safe_generated_artifact(path):
+            continue
+        if path.is_file():
+            path.unlink()
+            removed_files.append(path.relative_to(get_data_root()).as_posix())
+    records.pop(normalized_doc_id)
     save_records(records)
     rounds = doc_entry.get("rounds") if isinstance(doc_entry.get("rounds"), list) else []
-    removed_files = _delete_artifacts_for_removed_rounds(
-        [item for item in rounds if isinstance(item, dict)],
-        [],
-    )
     return {
         "docId": normalized_doc_id,
         "deletedRounds": [

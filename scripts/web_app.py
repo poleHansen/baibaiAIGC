@@ -44,6 +44,7 @@ ALLOWED_WEB_ORIGINS = {
 
 @dataclass
 class ProgressState:
+    source_path: str = ""
     completed: bool = False
     error: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -52,6 +53,7 @@ class ProgressState:
 
 
 RUN_STATES: dict[str, ProgressState] = {}
+_run_states_lock = threading.Lock()
 app = Flask(__name__)
 
 
@@ -277,7 +279,11 @@ def delete_history() -> tuple[Response, int] | Response:
             raise ValueError("docId is required.")
         if from_round is not None and not isinstance(from_round, int):
             raise ValueError("fromRound must be an integer when provided.")
-        return jsonify(delete_document_history(doc_id, from_round))
+        with _run_states_lock:
+            source = normalize_path(Path(doc_id))
+            if any(not state.completed and state.source_path == str(source) for state in list(RUN_STATES.values())):
+                return error_response("该文档仍在运行，请先停止任务并等待结束后再删除。", 409)
+            return jsonify(delete_document_history(doc_id, from_round))
     except Exception as exc:
         return error_response(str(exc))
 
@@ -323,14 +329,21 @@ def post_run_round() -> tuple[Response, int] | Response:
             raise ValueError("modelConfig is required.")
         if execution_options is not None and not isinstance(execution_options, dict):
             raise ValueError("executionOptions must be an object when provided.")
-        run_id = uuid.uuid4().hex
-        RUN_STATES[run_id] = ProgressState()
-        worker = threading.Thread(
-            target=run_round_async,
-            args=(run_id, source_path, model_config, execution_options),
-            daemon=True,
-        )
-        worker.start()
+        with _run_states_lock:
+            if not Path(source_path).is_file():
+                raise ValueError("原始文件不存在，请重新上传文档。")
+            run_id = uuid.uuid4().hex
+            RUN_STATES[run_id] = ProgressState(source_path=source_path)
+            worker = threading.Thread(
+                target=run_round_async,
+                args=(run_id, source_path, model_config, execution_options),
+                daemon=True,
+            )
+            try:
+                worker.start()
+            except Exception:
+                RUN_STATES.pop(run_id, None)
+                raise
         return jsonify({"runId": run_id}), 202
     except Exception as exc:
         return error_response(str(exc))

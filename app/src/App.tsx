@@ -253,7 +253,10 @@ export function App({ service, pickerLabel }: Props) {
   }
 
   async function handleDeleteHistory(docId: string, fromRound?: number) {
-    const actionLabel = fromRound ? `删除第 ${fromRound} 轮及之后的历史` : "删除整条历史";
+    if (fromRound == null && !window.confirm("确定永久删除此文档吗？原始上传、全部轮次、修订版、进度和导出文件将一并删除，无法恢复。")) {
+      return;
+    }
+    const actionLabel = fromRound ? `删除第 ${fromRound} 轮及之后的历史` : "删除文档及全部文件";
     try {
       setBusy(true);
       setError("");
@@ -283,8 +286,8 @@ export function App({ service, pickerLabel }: Props) {
       const deletedText = result.deletedRounds.length
         ? `已删除轮次：${result.deletedRounds.join(", ")}`
         : "没有匹配到可删除的轮次";
-      setNotice(result.removedDocument ? `历史已删除。${deletedText}` : `历史已更新。${deletedText}`);
-      setRuntimeStep(result.removedDocument ? "历史删除完成" : "历史回滚完成");
+      setNotice(result.removedDocument ? `${fromRound == null ? "文档及全部文件已删除。" : "历史已删除。"}${deletedText}` : `历史已更新。${deletedText}`);
+      setRuntimeStep(result.removedDocument ? (fromRound == null ? "文档删除完成" : "历史删除完成") : "历史回滚完成");
     } catch (appError) {
       setError(String(appError));
       setRuntimeStep(`${actionLabel}失败`);

@@ -39,3 +39,4 @@ dev-doc/
 /AGENTS.md
 tests
 app/round-preview.test.mjs
+app/document-deletion.test.mjs

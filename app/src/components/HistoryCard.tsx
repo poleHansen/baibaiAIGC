@@ -186,7 +186,7 @@ export function HistoryCard({
                         {isActive ? "重新加载" : "切换到此文档"}
                       </button>
                       <button className="secondary-button danger-button" onClick={() => onDelete(item.docId)} disabled={busy}>
-                        删除整条历史
+                        删除文档及全部文件
                       </button>
                     </div>
                     {activeRounds.length ? (
