@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import brandLogo from "./assets/logo.png";
 import { DocumentCard } from "./components/DocumentCard";
 import { HistoryCard } from "./components/HistoryCard";
 import { ModelConfigCard } from "./components/ModelConfigCard";
@@ -700,7 +701,7 @@ export function App({ service, pickerLabel }: Props) {
     <main className="app-shell">
       <div className="hero-panel">
         <div className="hero-copy-wrap">
-          <p className="eyebrow">baibaiAIGC</p>
+          <img className="brand-logo" src={brandLogo} alt="baibaiAIGC" />
           <h1>段落级 AIGC 文稿处理工作台</h1>
         </div>
         <div className="hero-status-column">

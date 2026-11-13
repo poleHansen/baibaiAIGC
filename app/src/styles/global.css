@@ -107,15 +107,20 @@ select {
 }
 
 .hero-copy-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
   max-width: 900px;
 }
 
-.eyebrow {
-  margin: 0 0 4px;
-  color: #0f6bdc;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+.brand-logo {
+  display: block;
+  flex: none;
+  height: 46px;
+  width: auto;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .hero-panel h1 {
@@ -734,6 +739,14 @@ select {
 
   .page-tab strong {
     font-size: 16px;
+  }
+
+  .hero-copy-wrap {
+    gap: 10px;
+  }
+
+  .brand-logo {
+    height: 32px;
   }
 
   .info-grid,
