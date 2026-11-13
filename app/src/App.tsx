@@ -25,8 +25,8 @@ type PageKey = "workspace" | "history" | "result";
 
 const PAGE_META: Array<{ key: PageKey; title: string; description: string }> = [
   { key: "workspace", title: "文档工作台", description: "模型设置、导入文档和整轮续跑" },
-  { key: "history", title: "历史记录", description: "查看轮次结果、修订版与导出记录" },
   { key: "result", title: "预览", description: "按段落选择后生成修订版或下一轮局部处理" },
+  { key: "history", title: "历史记录", description: "查看轮次结果、修订版与导出记录" },
 ];
 
 function formatRuntimeStep(progress: RoundProgress | null, fallback: string): string {
