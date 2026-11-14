@@ -55,6 +55,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from atomic_io import atomic_write_text
+
 from workspace_paths import finish_dir, get_data_root, origin_dir, records_path
 
 VALID_RECORD_STATUSES = {"in_progress", "interrupted", "completed"}
@@ -226,7 +228,8 @@ def save_records(records: Dict[str, Any]) -> None:
 
     _ensure_finish_dir()
     text = json.dumps(records, ensure_ascii=False, indent=2, sort_keys=True)
-    records_path().write_text(text, encoding="utf-8")
+    # 非原子写入会让并发读取拿到空文件，进而报 JSON 解析错误。
+    atomic_write_text(records_path(), text)
 
 
 def normalize_record_path(path: str) -> str:

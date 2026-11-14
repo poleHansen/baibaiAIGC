@@ -17,6 +17,7 @@ from aigc_records import (
 )
 from aigc_round_service import MAX_ROUNDS, RoundPausedError, RoundStoppedError, build_progress_path, get_chunk_metric, normalize_path, request_stop, run_round
 from app_config import normalize_model_config, resolve_model_config
+from atomic_io import read_json_or_none
 from chunking import build_manifest, load_manifest, split_text_to_paragraphs
 from docx_pipeline import _split_text_into_blocks, render_docx_from_template, write_docx_text
 from llm_client import fetch_model_list, llm_completion, test_llm_connection
@@ -176,65 +177,36 @@ def _upsert_history_record(
     )
 
 
+def _empty_progress_summary(progress_path: Path | str = "") -> dict[str, Any]:
+    return {
+        "progressPath": str(progress_path),
+        "progressStatus": "",
+        "completedChunkCount": 0,
+        "totalChunkCount": 0,
+        "lastError": "",
+        "lastErrorChunkId": "",
+        "stopRequested": False,
+        "stopReason": "",
+        "applyMode": "",
+        "targetParagraphIndexes": [],
+        "sourceRound": None,
+        "targetRound": None,
+        "revisionNumber": None,
+        "basedOnOutputPath": "",
+        "basedOnManifestPath": "",
+    }
+
+
 def _read_progress_summary(manifest_path: str) -> dict[str, Any]:
     if not manifest_path:
-        return {
-            "progressPath": "",
-            "progressStatus": "",
-            "completedChunkCount": 0,
-            "totalChunkCount": 0,
-            "lastError": "",
-            "lastErrorChunkId": "",
-            "stopRequested": False,
-            "stopReason": "",
-            "applyMode": "",
-            "targetParagraphIndexes": [],
-            "sourceRound": None,
-            "targetRound": None,
-            "revisionNumber": None,
-            "basedOnOutputPath": "",
-            "basedOnManifestPath": "",
-        }
+        return _empty_progress_summary()
 
     progress_path = build_progress_path(normalize_path(Path(manifest_path)))
-    if not progress_path.exists():
-        return {
-            "progressPath": str(progress_path),
-            "progressStatus": "",
-            "completedChunkCount": 0,
-            "totalChunkCount": 0,
-            "lastError": "",
-            "lastErrorChunkId": "",
-            "stopRequested": False,
-            "stopReason": "",
-            "applyMode": "",
-            "targetParagraphIndexes": [],
-            "sourceRound": None,
-            "targetRound": None,
-            "revisionNumber": None,
-            "basedOnOutputPath": "",
-            "basedOnManifestPath": "",
-        }
-
-    data = json.loads(progress_path.read_text(encoding="utf-8"))
+    # 运行中进度文件会被原子替换。读不到（不存在/为空/损坏）就按“暂无进度”返回，
+    # 否则并发读到空文件会让历史列表接口直接 400。
+    data = read_json_or_none(progress_path)
     if not isinstance(data, dict):
-        return {
-            "progressPath": str(progress_path),
-            "progressStatus": "",
-            "completedChunkCount": 0,
-            "totalChunkCount": 0,
-            "lastError": "",
-            "lastErrorChunkId": "",
-            "stopRequested": False,
-            "stopReason": "",
-            "applyMode": "",
-            "targetParagraphIndexes": [],
-            "sourceRound": None,
-            "targetRound": None,
-            "revisionNumber": None,
-            "basedOnOutputPath": "",
-            "basedOnManifestPath": "",
-        }
+        return _empty_progress_summary(progress_path)
 
     return {
         "progressPath": str(progress_path),

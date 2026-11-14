@@ -462,7 +462,8 @@ export function App({ service, pickerLabel }: Props) {
       setProgress(null);
       progressUnlistenRef.current?.();
       const runToken = await service.startRunRound(documentStatus.sourcePath, modelConfig, executionOptions);
-      await refreshHistoryList();
+      // 历史列表只是辅助展示，刷新失败不能把已经启动的轮次判成失败。
+      await refreshHistoryList().catch(() => null);
       progressUnlistenRef.current = await service.listenRoundProgress((nextProgress) => {
         setProgress(nextProgress);
         setRuntimeStep(formatRuntimeStep(nextProgress, "处理中"));
@@ -502,12 +503,13 @@ export function App({ service, pickerLabel }: Props) {
         },
       });
       clearPreviewSelection();
-      const status = await refreshDocumentState(documentStatus.sourcePath);
-      await refreshHistoryList();
+      // 收尾的状态/历史刷新失败，不该把已经完成的轮次显示成“执行轮次失败”。
+      const status = await refreshDocumentState(documentStatus.sourcePath).catch(() => null);
+      await refreshHistoryList().catch(() => null);
       setCurrentPage("result");
       setHistoryPanelOpen(true);
       setRuntimeStep(
-        status.hasNextRound && status.nextRound
+        status?.hasNextRound && status.nextRound
           ? `第 ${result.round} 轮完成，下一步可执行第 ${status.nextRound} 轮`
           : `第 ${result.round} 轮完成，当前文档全部轮次已结束`,
       );
@@ -517,7 +519,7 @@ export function App({ service, pickerLabel }: Props) {
         setNotice(`第 ${result.round} 轮局部处理已完成，本次处理了 ${result.targetParagraphIndexes.length} 段。`);
       } else {
         setNotice(
-          status.hasNextRound
+          status?.hasNextRound
             ? `第 ${result.round} 轮已完成${result.resumed ? "，本次为断点续跑" : ""}，可以继续导出或进入下一轮。`
             : `第 ${result.round} 轮已完成${result.resumed ? "，本次为断点续跑" : ""}，当前文档的全部轮次已结束，可以直接导出。`,
         );

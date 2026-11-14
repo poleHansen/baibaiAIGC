@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from aigc_records import update_round
+from atomic_io import atomic_write_json
 from chunking import DEFAULT_CHUNK_LIMIT, Chunk, ChunkManifest, build_manifest, restore_text_from_chunks, save_manifest
 from workspace_paths import get_code_root, get_data_root
 
@@ -418,7 +419,14 @@ def _load_progress_payload(
             based_on_manifest_path=based_on_manifest_path,
         )
 
-    data = json.loads(progress_path.read_text(encoding="utf-8"))
+    data = None
+    try:
+        raw = progress_path.read_text(encoding="utf-8")
+    except OSError:
+        raw = ""
+    if raw.strip():
+        # 内容损坏仍然抛错（多半是真出问题）；只有截断窗口里的空文件按“无进度”处理。
+        data = json.loads(raw)
     if not isinstance(data, dict):
         return _default_progress_payload(
             manifest,
@@ -485,8 +493,8 @@ def _load_progress_payload(
 
 
 def _save_progress_payload(progress_path: Path, payload: dict[str, object]) -> None:
-    progress_path.parent.mkdir(parents=True, exist_ok=True)
-    progress_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 前端会在运行中轮询历史/状态接口，必须原子替换，否则读取方会读到空文件。
+    atomic_write_json(progress_path, payload)
 
 
 def _normalize_target_paragraph_indexes(
@@ -547,7 +555,7 @@ def request_stop(progress_path: Path, *, reason: str = "用户手动停止，保
         "requested": True,
         "reason": reason,
     }
-    stop_request_path.write_text(json.dumps(stop_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(stop_request_path, stop_payload)
 
     if normalized_progress_path.exists():
         try:
