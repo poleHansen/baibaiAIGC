@@ -10,6 +10,7 @@ import type {
   HistoryListResponse,
   ModelConfig,
   OutputPreview,
+  ProgressPreview,
   RoundProgress,
   RoundResult,
   RunExecutionOptions,
@@ -366,6 +367,12 @@ export const webService: AppService = {
   async readOutputPreview(outputPath: string, manifestPath: string): Promise<OutputPreview> {
     return requestJson<OutputPreview>(
       `/api/read-output-preview?outputPath=${encodeURIComponent(outputPath)}&manifestPath=${encodeURIComponent(manifestPath)}`,
+    );
+  },
+
+  async readProgressPreview(manifestPath: string): Promise<ProgressPreview> {
+    return requestJson<ProgressPreview>(
+      `/api/read-progress-preview?manifestPath=${encodeURIComponent(manifestPath)}`,
     );
   },
 

@@ -18,9 +18,14 @@ export type ActivePreview = {
   manifestPath: string;
   sourcePath: string;
   docxOutputPath: string;
-  kind: "round" | "revision" | "current-result";
+  // streaming：轮次运行中，预览按已完成段落增量追加。
+  kind: "round" | "revision" | "current-result" | "streaming";
   sourceRound: number;
   preview: OutputPreview;
+  /** 流式预览时还没生成完的段落数，用于展示 x/总 与进度条。 */
+  pendingParagraphCount?: number;
+  /** 流式预览被中断（停止/报错）时置真，界面不再显示「生成中」。 */
+  streamingInterrupted?: boolean;
 };
 
 type AppState = {

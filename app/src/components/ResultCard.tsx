@@ -17,6 +17,12 @@ type Props = {
 };
 
 function formatPreviewLabel(preview: ActivePreview): string {
+  if (preview.kind === "streaming") {
+    const suffix = preview.streamingInterrupted ? "已中断" : "生成中";
+    return preview.revisionNumber
+      ? `第 ${preview.round} 轮 / 修订 ${preview.revisionNumber} · ${suffix}`
+      : `第 ${preview.round} 轮 · ${suffix}`;
+  }
   if (preview.kind === "current-result") {
     return preview.revisionNumber ? `第 ${preview.round} 轮 / 修订 ${preview.revisionNumber}` : `第 ${preview.round} 轮最新结果`;
   }
@@ -46,7 +52,12 @@ export function ResultCard({
   const pausedError = typeof result?.docEntry?.last_error === "string" ? result.docEntry.last_error : "";
   const paragraphCount = activePreview?.preview.paragraphs.length ?? 0;
   const selectedCount = selectedParagraphIndexes.length;
-  const canRunSelection = Boolean(activePreview && selectedCount > 0 && !busy);
+  // 运行中的增量预览：段落会一段段追加进来，此时不允许选择/导出（输出文件还没生成）。
+  const isStreaming = activePreview?.kind === "streaming";
+  const streamingPending = activePreview?.pendingParagraphCount ?? 0;
+  const streamingTotal = paragraphCount + streamingPending;
+  const streamingPercent = streamingTotal > 0 ? Math.round((paragraphCount / streamingTotal) * 100) : 0;
+  const canRunSelection = Boolean(activePreview && selectedCount > 0 && !busy && !isStreaming);
   const canCreateRevision = canRunSelection && !(activePreview?.kind === "round" && activePreview.round === 0);
   const canRunNextPartial = canRunSelection && activePreview?.round !== undefined && activePreview.round + 1 === nextRound;
 
@@ -61,6 +72,18 @@ export function ResultCard({
       </div>
       {activePreview ? (
         <>
+          {isStreaming ? (
+            <div className={`stream-progress ${activePreview.streamingInterrupted ? "is-interrupted" : ""}`}>
+              <div className="stream-progress-track">
+                <span className="stream-progress-fill" style={{ width: `${streamingPercent}%` }} />
+              </div>
+              <p className="stream-progress-text">
+                {activePreview.streamingInterrupted
+                  ? `本轮已中断，已生成 ${paragraphCount}/${streamingTotal} 段，已完成的内容保留在预览里。`
+                  : `已完成 ${paragraphCount}/${streamingTotal} 段，处理完一段就追加一段，不用等整份文件。`}
+              </p>
+            </div>
+          ) : null}
           <div className="info-grid compact">
             <div className="info-item">
               <span>预览来源</span>
@@ -88,10 +111,10 @@ export function ResultCard({
             ) : null}
           </div>
           <div className="button-row">
-            <button className="secondary-button" onClick={onSelectAllParagraphs} disabled={busy || !paragraphCount}>
+            <button className="secondary-button" onClick={onSelectAllParagraphs} disabled={busy || isStreaming || !paragraphCount}>
               全选段落
             </button>
-            <button className="secondary-button" onClick={onClearParagraphs} disabled={busy || !selectedCount}>
+            <button className="secondary-button" onClick={onClearParagraphs} disabled={busy || isStreaming || !selectedCount}>
               清空选择
             </button>
             <button className="secondary-button" onClick={onCreateRevision} disabled={!canCreateRevision}>
@@ -101,6 +124,12 @@ export function ResultCard({
               在下一轮处理所选段落
             </button>
           </div>
+          {isStreaming && paragraphCount === 0 ? (
+            <div className="empty-state stream-empty-state">
+              <strong>第 1 段正在生成</strong>
+              <p>处理完一段就会追加到这里，可以一直盯着进度，不用等整份文件跑完。</p>
+            </div>
+          ) : null}
           <div className="paragraph-preview-list">
             {activePreview.preview.paragraphs.map((paragraph) => {
               const checked = selectedParagraphIndexes.includes(paragraph.paragraphIndex);
@@ -113,7 +142,7 @@ export function ResultCard({
                     type="checkbox"
                     checked={checked}
                     onChange={() => onToggleParagraph(paragraph.paragraphIndex)}
-                    disabled={busy}
+                    disabled={busy || isStreaming}
                   />
                   <div className="paragraph-preview-content">
                     <div className="paragraph-preview-head">
@@ -125,12 +154,24 @@ export function ResultCard({
                 </label>
               );
             })}
+            {isStreaming && paragraphCount > 0 && !activePreview.streamingInterrupted ? (
+              <div className="paragraph-preview-item stream-placeholder">
+                <span className="stream-dot" aria-hidden="true" />
+                <div className="paragraph-preview-content">
+                  <div className="paragraph-preview-head">
+                    <strong>第 {paragraphCount + 1} 段</strong>
+                    <span>生成中…</span>
+                  </div>
+                  <p>正在调用模型，完成后立即追加到这里。</p>
+                </div>
+              </div>
+            ) : null}
           </div>
           <div className="button-row">
-            <button className="secondary-button" onClick={onExportTxt} disabled={busy}>
+            <button className="secondary-button" onClick={onExportTxt} disabled={busy || isStreaming}>
               导出 TXT
             </button>
-            <button className="primary-button" onClick={onExportDocx} disabled={busy}>
+            <button className="primary-button" onClick={onExportDocx} disabled={busy || isStreaming}>
               导出 Word
             </button>
           </div>

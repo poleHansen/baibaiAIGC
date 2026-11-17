@@ -7,6 +7,7 @@ import type {
   HistoryListResponse,
   ModelConfig,
   OutputPreview,
+  ProgressPreview,
   RoundProgress,
   RoundResult,
   RunExecutionOptions,
@@ -35,6 +36,7 @@ export interface AppService {
   listenRoundProgress(onProgress: (payload: RoundProgress) => void, runToken?: string | null): Promise<() => void>;
   readOutput(outputPath: string): Promise<{ path: string; text: string }>;
   readOutputPreview(outputPath: string, manifestPath: string): Promise<OutputPreview>;
+  readProgressPreview(manifestPath: string): Promise<ProgressPreview>;
   readSourcePreview(inputPath: string, manifestPath: string, promptProfile: "cn" | "en"): Promise<OutputPreview>;
   exportRound(
     outputPath: string,

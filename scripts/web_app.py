@@ -20,6 +20,7 @@ from app_service import (
     list_document_histories,
     read_output_text,
     read_output_preview,
+    read_progress_preview,
     read_source_preview,
     request_stop_for_app,
     run_round_for_app,
@@ -303,6 +304,19 @@ def get_read_output_preview() -> tuple[Response, int] | Response:
         output_path = require_managed_output_path(require_query_value("outputPath"))
         manifest_path = require_managed_output_path(require_query_value("manifestPath"))
         return jsonify(read_output_preview(output_path, manifest_path))
+    except Exception as exc:
+        return error_response(str(exc))
+
+
+@app.route("/api/read-progress-preview", methods=["GET"])
+def get_read_progress_preview() -> tuple[Response, int] | Response:
+    # 运行中预览：只依赖 manifest + 进度文件，输出文件整轮结束才存在。
+    try:
+        manifest_path = require_managed_output_path(require_query_value("manifestPath"))
+        response = jsonify(read_progress_preview(manifest_path))
+        # 内容随处理进度增长，任何一层缓存都会让前端看到旧段落。
+        response.headers["Cache-Control"] = "no-store"
+        return response
     except Exception as exc:
         return error_response(str(exc))
 

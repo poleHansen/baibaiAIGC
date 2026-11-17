@@ -265,3 +265,23 @@ export type OutputPreview = {
   text: string;
   paragraphs: ParagraphPreview[];
 };
+
+/**
+ * 运行中的增量预览：只包含「从第 1 段起连续完成」的段落。
+ * 段落数会随处理进度增长，整轮结束后由 RoundResult 的完整预览替换。
+ */
+export type ProgressPreview = {
+  manifestPath: string;
+  progressPath: string;
+  progressStatus: string;
+  outputPath: string;
+  round: number | null;
+  applyMode: ApplyMode | "";
+  revisionNumber: number | null;
+  text: string;
+  paragraphs: ParagraphPreview[];
+  availableParagraphCount: number;
+  totalParagraphCount: number;
+  completedChunkCount: number;
+  totalChunkCount: number;
+};

@@ -12,6 +12,7 @@ import type {
   HistoryListResponse,
   ModelConfig,
   OutputPreview,
+  ProgressPreview,
   RoundProgress,
   RoundResult,
   RunExecutionOptions,
@@ -93,6 +94,10 @@ export const desktopService: AppService = {
 
   async readOutputPreview(outputPath: string, manifestPath: string): Promise<OutputPreview> {
     return invoke<OutputPreview>("read_output_preview", { outputPath, manifestPath });
+  },
+
+  async readProgressPreview(manifestPath: string): Promise<ProgressPreview> {
+    return invoke<ProgressPreview>("read_progress_preview", { manifestPath });
   },
 
   async readSourcePreview(inputPath: string, manifestPath: string, promptProfile: "cn" | "en"): Promise<OutputPreview> {

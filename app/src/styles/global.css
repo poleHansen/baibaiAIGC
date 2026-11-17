@@ -668,6 +668,82 @@ select {
   line-height: 1.65;
 }
 
+/* 运行中的增量预览：进度条 + 正在生成的占位行 */
+.stream-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(0, 113, 227, 0.06);
+  border: 1px solid rgba(0, 113, 227, 0.14);
+}
+
+.stream-progress.is-interrupted {
+  background: rgba(255, 159, 10, 0.1);
+  border-color: rgba(255, 159, 10, 0.22);
+}
+
+.stream-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.14);
+  overflow: hidden;
+}
+
+.stream-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(18, 120, 255, 0.92), rgba(47, 176, 116, 0.9));
+  transition: width 0.35s ease;
+}
+
+.stream-progress-text {
+  margin: 0;
+  font-size: 11px;
+  color: #3a3a3c;
+}
+
+.stream-progress.is-interrupted .stream-progress-text {
+  color: #9a5c00;
+}
+
+.stream-empty-state {
+  min-height: 120px;
+}
+
+.paragraph-preview-item.stream-placeholder {
+  border-style: dashed;
+  background: rgba(240, 247, 255, 0.66);
+}
+
+.paragraph-preview-item.stream-placeholder p {
+  color: #6e6e73;
+}
+
+.stream-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: rgba(0, 113, 227, 0.85);
+  animation: stream-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes stream-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .preview-box {
   min-height: 220px;
   max-height: 360px;

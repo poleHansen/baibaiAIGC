@@ -12,6 +12,7 @@ import type {
   HistoryDocumentSummary,
   HistoryRevision,
   HistoryRound,
+  ProgressPreview,
   RoundProgress,
   RunExecutionOptions,
 } from "./types/app";
@@ -121,6 +122,45 @@ function buildActivePreviewFromVersion(
     kind: item.kind,
     sourceRound: item.kind === "revision" ? item.sourceRound ?? item.targetRound ?? 0 : item.round,
     preview,
+  };
+}
+
+const STREAM_PREVIEW_INTERVAL_MS = 700;
+
+/**
+ * 轮次运行中的预览：内容来自进度文件里已完成的段落，随处理进度一段段追加。
+ * 整轮结束后会用 RoundResult 的完整预览整体替换，所以这里只需要「先能看见」。
+ */
+function buildStreamingPreview(
+  preview: ProgressPreview,
+  context: {
+    round: number;
+    revisionNumber: number | null;
+    sourcePath: string;
+    interrupted: boolean;
+  },
+): ActivePreview {
+  const total = preview.totalParagraphCount || preview.availableParagraphCount;
+  const suffix = context.interrupted ? "中断前的已有内容" : "生成中";
+  return {
+    label: context.revisionNumber
+      ? `第 ${context.round} 轮 / 修订 ${context.revisionNumber} · ${suffix}`
+      : `第 ${context.round} 轮 · ${suffix}`,
+    round: context.round,
+    revisionNumber: context.revisionNumber,
+    outputPath: preview.outputPath,
+    manifestPath: preview.manifestPath,
+    sourcePath: context.sourcePath,
+    docxOutputPath: "",
+    kind: "streaming",
+    sourceRound: context.round,
+    preview: {
+      path: preview.outputPath,
+      text: preview.text,
+      paragraphs: preview.paragraphs,
+    },
+    pendingParagraphCount: Math.max(total - preview.availableParagraphCount, 0),
+    streamingInterrupted: context.interrupted,
   };
 }
 
@@ -454,6 +494,96 @@ export function App({ service, pickerLabel }: Props) {
       setNotice("当前文档已完成全部轮次，如需重跑请先从历史记录回滚。");
       return;
     }
+    const runSourcePath = documentStatus.sourcePath;
+    // 运行中的增量预览：每完成一块就（节流）拉一次「已完成段落」，让预览边跑边长。
+    const streaming = {
+      manifestPath: documentStatus.manifestPath || "",
+      round: documentStatus.targetRound ?? documentStatus.nextRound ?? 0,
+      revisionNumber: null as number | null,
+      timer: null as number | null,
+      inFlight: false,
+      queued: false,
+      lastFetchedAt: 0,
+      started: false,
+      stopped: false,
+      interrupted: false,
+    };
+    const stopStreaming = () => {
+      streaming.stopped = true;
+      if (streaming.timer !== null) {
+        window.clearTimeout(streaming.timer);
+        streaming.timer = null;
+      }
+    };
+    const applyStreamingPreview = (preview: ProgressPreview, allowStopped = false): boolean => {
+      // 整轮已经结束时不再用增量内容覆盖完整结果（最后一块的请求可能晚到）。
+      if (streaming.stopped && !allowStopped) {
+        return false;
+      }
+      if (typeof preview.round === "number") {
+        streaming.round = preview.round;
+      }
+      if (typeof preview.revisionNumber === "number") {
+        streaming.revisionNumber = preview.revisionNumber;
+      }
+      // 一段都还没完成时保持原样，避免把旧版本的预览清空成空白。
+      if (!preview.availableParagraphCount) {
+        return false;
+      }
+      setActivePreview(buildStreamingPreview(preview, {
+        round: streaming.round,
+        revisionNumber: streaming.revisionNumber,
+        sourcePath: runSourcePath,
+        interrupted: streaming.interrupted,
+      }));
+      setPreviewText(preview.text);
+      return true;
+    };
+    const fetchStreamingPreview = async (interrupted: boolean): Promise<boolean> => {
+      if (!streaming.manifestPath) {
+        return false;
+      }
+      const preview = await service.readProgressPreview(streaming.manifestPath);
+      streaming.interrupted = interrupted;
+      return applyStreamingPreview(preview, interrupted);
+    };
+    const pumpStreamingPreview = async (): Promise<void> => {
+      if (streaming.stopped || !streaming.manifestPath) {
+        return;
+      }
+      const elapsed = Date.now() - streaming.lastFetchedAt;
+      if (elapsed < STREAM_PREVIEW_INTERVAL_MS) {
+        if (streaming.timer === null) {
+          streaming.timer = window.setTimeout(() => {
+            streaming.timer = null;
+            void pumpStreamingPreview();
+          }, STREAM_PREVIEW_INTERVAL_MS - elapsed);
+        }
+        return;
+      }
+      if (streaming.inFlight) {
+        streaming.queued = true;
+        return;
+      }
+      streaming.inFlight = true;
+      streaming.lastFetchedAt = Date.now();
+      try {
+        // 增量预览只是加速反馈：失败不影响正在跑的轮次，静默跳过。
+        if (await fetchStreamingPreview(false)) {
+          setCurrentPage("result");
+          setHistoryPanelOpen(true);
+        }
+      } catch {
+        // ignored
+      } finally {
+        streaming.inFlight = false;
+        if (streaming.queued && !streaming.stopped) {
+          streaming.queued = false;
+          void pumpStreamingPreview();
+        }
+      }
+    };
+
     try {
       setBusy(true);
       setStopBusy(false);
@@ -461,7 +591,8 @@ export function App({ service, pickerLabel }: Props) {
       setNotice("");
       setProgress(null);
       progressUnlistenRef.current?.();
-      const runToken = await service.startRunRound(documentStatus.sourcePath, modelConfig, executionOptions);
+      const runToken = await service.startRunRound(runSourcePath, modelConfig, executionOptions);
+      streaming.started = true;
       // 历史列表只是辅助展示，刷新失败不能把已经启动的轮次判成失败。
       await refreshHistoryList().catch(() => null);
       progressUnlistenRef.current = await service.listenRoundProgress((nextProgress) => {
@@ -472,6 +603,27 @@ export function App({ service, pickerLabel }: Props) {
         }
         if (nextProgress.phase === "stopped") {
           setNotice(nextProgress.message || "已按你的请求停止，当前进度已保留。");
+        }
+        if (nextProgress.phase === "chunking-ready") {
+          if (nextProgress.manifestPath) {
+            streaming.manifestPath = nextProgress.manifestPath;
+          }
+          if (typeof nextProgress.round === "number") {
+            streaming.round = nextProgress.round;
+          }
+          streaming.revisionNumber = typeof nextProgress.revisionNumber === "number" ? nextProgress.revisionNumber : null;
+          // 切到预览页：用户能立刻看到内容一段段长出来，而不是干等整份文件。
+          setCurrentPage("result");
+          setHistoryPanelOpen(true);
+          void pumpStreamingPreview();
+          return;
+        }
+        if (
+          nextProgress.phase === "chunk-complete"
+          || nextProgress.phase === "chunk-preserved"
+          || nextProgress.phase === "chunk-skipped"
+        ) {
+          void pumpStreamingPreview();
         }
       }, runToken);
       const runLabel = executionOptions?.applyMode === "current_round_revision"
@@ -484,6 +636,8 @@ export function App({ service, pickerLabel }: Props) {
       progressUnlistenRef.current?.();
       progressUnlistenRef.current = null;
       setProgress(null);
+      // 整轮结束：停掉增量预览，用完整结果整体替换。
+      stopStreaming();
       setRoundResult(result);
       setPreviewText(result.paragraphs.map((paragraph) => paragraph.text).join("\n\n"));
       setActivePreview({
@@ -527,6 +681,11 @@ export function App({ service, pickerLabel }: Props) {
     } catch (appError) {
       progressUnlistenRef.current?.();
       progressUnlistenRef.current = null;
+      // 中断/停止时把已经生成的段落定格在预览里，并标注不再「生成中」。
+      stopStreaming();
+      if (streaming.started) {
+        await fetchStreamingPreview(true).catch(() => false);
+      }
       const latestStatus = await refreshDocumentState(documentStatus.sourcePath).catch(() => null);
       await refreshHistoryList().catch(() => null);
       const interruptedMessage = latestStatus?.status === "interrupted"

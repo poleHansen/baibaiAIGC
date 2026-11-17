@@ -18,7 +18,7 @@ from aigc_records import (
 from aigc_round_service import MAX_ROUNDS, RoundPausedError, RoundStoppedError, build_progress_path, get_chunk_metric, normalize_path, request_stop, run_round
 from app_config import normalize_model_config, resolve_model_config
 from atomic_io import read_json_or_none
-from chunking import build_manifest, load_manifest, split_text_to_paragraphs
+from chunking import build_manifest, load_manifest, restore_partial_paragraph_texts, split_text_to_paragraphs
 from docx_pipeline import _split_text_into_blocks, render_docx_from_template, write_docx_text
 from llm_client import fetch_model_list, llm_completion, test_llm_connection
 from managed_sources import get_display_name_for_source
@@ -339,7 +339,14 @@ def _record_entry_to_history(doc_id: str, entry: dict[str, Any]) -> dict[str, An
                 latest_timestamp = revision_timestamp
                 latest_version_output = str(revision.get("outputPath", "") or "")
     origin_path = str(entry.get("origin_path", doc_id))
-    display_name = str(entry.get("display_name", "") or "").strip() or get_display_name_for_source(origin_path)
+    display_name = str(entry.get("display_name", "") or "").strip()
+    if not display_name:
+        try:
+            display_name = get_display_name_for_source(origin_path)
+        except ValueError:
+            # 老记录/手工残留的 origin_path 可能没有扩展名（例如直接就是 doc_id）。
+            # 一条脏记录不该让整个历史列表 400，退回文件名即可。
+            display_name = Path(origin_path).name or doc_id
 
     return {
         "docId": doc_id,
@@ -374,6 +381,85 @@ def _build_paragraph_preview(output_path: str, manifest_path: str) -> dict[str, 
         "path": str(normalized_output_path),
         "text": text,
         "paragraphs": preview_items,
+    }
+
+
+def _read_progress_chunk_outputs(manifest: Any, payload: Any) -> dict[str, str]:
+    """取出进度里已完成块的输出，并丢弃与当前 manifest 不匹配的残留。"""
+    raw_outputs = payload.get("chunk_outputs") if isinstance(payload, dict) else None
+    if not isinstance(raw_outputs, dict):
+        return {}
+    known_chunk_ids = {chunk.chunk_id for chunk in manifest.chunks}
+    return {
+        str(chunk_id): str(output)
+        for chunk_id, output in raw_outputs.items()
+        if chunk_id in known_chunk_ids and isinstance(output, str) and output.strip()
+    }
+
+
+def _empty_progress_preview(manifest_path: Path, progress_path: Path) -> dict[str, Any]:
+    return {
+        "manifestPath": str(manifest_path),
+        "progressPath": str(progress_path),
+        "progressStatus": "",
+        "outputPath": "",
+        "round": None,
+        "applyMode": "",
+        "revisionNumber": None,
+        "text": "",
+        "paragraphs": [],
+        "availableParagraphCount": 0,
+        "totalParagraphCount": 0,
+        "completedChunkCount": 0,
+        "totalChunkCount": 0,
+    }
+
+
+def read_progress_preview(manifest_path: str) -> dict[str, Any]:
+    """运行中的增量预览：返回「从头开始连续完成」的段落，供前端边跑边追加。
+
+    输出文件要整轮结束才生成，所以这里直接读进度文件里的 chunk_outputs。
+    进度文件是原子替换的，运行中读取不会读到半截内容。
+    """
+    normalized_manifest_path = normalize_path(Path(manifest_path))
+    progress_path = build_progress_path(normalized_manifest_path)
+    try:
+        manifest = load_manifest(normalized_manifest_path)
+    except (OSError, ValueError):
+        # 轮次刚启动、manifest 还没写完（非原子写）时按「暂无内容」处理，
+        # 前后端都不该因为抢跑拿到一个 400。
+        return _empty_progress_preview(normalized_manifest_path, progress_path)
+    data = read_json_or_none(progress_path)
+    payload = data if isinstance(data, dict) else {}
+    chunk_outputs = _read_progress_chunk_outputs(manifest, payload)
+
+    paragraph_texts = restore_partial_paragraph_texts(manifest, chunk_outputs)
+    preview_items: list[dict[str, Any]] = []
+    for paragraph_index, text in enumerate(paragraph_texts):
+        paragraph = manifest.paragraphs[paragraph_index]
+        preview_items.append(
+            {
+                "paragraphIndex": int(paragraph.paragraph_index),
+                "text": text,
+                "chunkIds": list(paragraph.chunk_ids),
+                "chunkCount": len(paragraph.chunk_ids),
+            }
+        )
+
+    return {
+        "manifestPath": str(normalized_manifest_path),
+        "progressPath": str(progress_path),
+        "progressStatus": str(payload.get("status", "") or ""),
+        "outputPath": str(payload.get("output_path", "") or ""),
+        "round": payload.get("round"),
+        "applyMode": str(payload.get("apply_mode", "") or ""),
+        "revisionNumber": payload.get("revision_number"),
+        "text": "\n\n".join(paragraph_texts),
+        "paragraphs": preview_items,
+        "availableParagraphCount": len(preview_items),
+        "totalParagraphCount": manifest.paragraph_count,
+        "completedChunkCount": len(chunk_outputs),
+        "totalChunkCount": manifest.chunk_count,
     }
 
 
@@ -590,11 +676,16 @@ def get_document_history(source_path: str) -> dict[str, Any]:
 
 def list_document_histories() -> dict[str, Any]:
     records = list_records()
-    items = [
-        _record_entry_to_history(doc_id, entry)
-        for doc_id, entry in records.items()
-        if isinstance(entry, dict)
-    ]
+    items = []
+    for doc_id, entry in records.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            items.append(_record_entry_to_history(doc_id, entry))
+        except Exception:
+            # 单条记录损坏（手工改过、旧版本残留）时跳过它，
+            # 不能让整个历史列表连同首屏一起报错。
+            continue
     items.sort(key=lambda item: (item.get("lastTimestamp", ""), item.get("docId", "")), reverse=True)
     return {
         "items": items,
@@ -1013,6 +1104,9 @@ def cli_main() -> None:
     preview_detail_parser.add_argument("output_path")
     preview_detail_parser.add_argument("manifest_path")
 
+    progress_preview_parser = subparsers.add_parser("read-progress-preview")
+    progress_preview_parser.add_argument("manifest_path")
+
     source_preview_parser = subparsers.add_parser("read-source-preview")
     source_preview_parser.add_argument("input_path")
     source_preview_parser.add_argument("manifest_path")
@@ -1068,6 +1162,9 @@ def cli_main() -> None:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         elif args.command == "read-output-preview":
             payload = read_output_preview(args.output_path, args.manifest_path)
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        elif args.command == "read-progress-preview":
+            payload = read_progress_preview(args.manifest_path)
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         elif args.command == "read-source-preview":
             payload = read_source_preview(args.input_path, args.manifest_path, args.prompt_profile)

@@ -151,6 +151,25 @@ def restore_text_from_chunks(manifest: ChunkManifest, chunk_results: dict[str, s
     return "\n\n".join(restored_paragraphs)
 
 
+def restore_partial_paragraph_texts(manifest: ChunkManifest, chunk_results: dict[str, str]) -> list[str]:
+    """按段落顺序返回已经完成的段落，遇到第一处未完成的段落就停止。
+
+    分块是并发处理的，完成顺序不保证（第 2 段可能比第 1 段先回来）。
+    运行中的预览只追加「从第 1 段起连续成立」的内容：否则界面上会先出现空洞
+    再被填上，用户看不到稳定的进度推进。整轮结束时仍以 restore_text_from_chunks 为准。
+    """
+    restored: list[str] = []
+    for paragraph in manifest.paragraphs:
+        parts: list[str] = []
+        for chunk_id in paragraph.chunk_ids:
+            output = chunk_results.get(chunk_id)
+            if not output or not output.strip():
+                return restored
+            parts.append(output.strip())
+        restored.append("".join(parts))
+    return restored
+
+
 def save_manifest(manifest: ChunkManifest, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")

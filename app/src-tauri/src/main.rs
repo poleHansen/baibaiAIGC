@@ -343,6 +343,16 @@ async fn read_output_preview(output_path: String, manifest_path: String) -> Resu
 }
 
 #[tauri::command]
+async fn read_progress_preview(manifest_path: String) -> Result<serde_json::Value, String> {
+    spawn_blocking(move || {
+        let output = run_python_json(&["read-progress-preview".to_string(), manifest_path])?;
+        serde_json::from_str(&output).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn read_source_preview(input_path: String, manifest_path: String, prompt_profile: String) -> Result<serde_json::Value, String> {
     spawn_blocking(move || {
         let output = run_python_json(&["read-source-preview".to_string(), input_path, manifest_path, prompt_profile])?;
@@ -400,6 +410,7 @@ fn main() {
             run_aigc_round,
             read_output_text,
             read_output_preview,
+            read_progress_preview,
             read_source_preview,
             export_round_output,
         ])
