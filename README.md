@@ -4,6 +4,9 @@
    <img src="e7d4bdd094205b9e244508aca83e4d3a.png" alt="图片" width="300">
 </div>
 
+在线体验地址：https://baibaiaigc.xyz/
+
+
 本仓库支持四种使用方式：
 
 1. 对话 skill 模式：在聊天中按 `SKILL.md` 约束执行单轮改写；安装本仓库作为 skill 后即可直接使用。
