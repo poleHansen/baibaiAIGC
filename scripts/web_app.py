@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -8,6 +9,39 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, request, send_file, stream_with_context
+
+logger = logging.getLogger(__name__)
+
+# 公开仓库可独立运行：server 包不可用时降级为最小实现，不破坏桌面/CLI 用法。
+try:
+    from server.observability import (
+        bind as _bind_context,
+        capture as _capture_context,
+        clear as _clear_context,
+        get_request_id as _current_request_id,
+        to_error_response as _to_error_response,
+    )
+    from server.observability.redact import redact as _redact
+except Exception:  # pragma: no cover - 仅在公开仓库独立运行时触发
+    def _bind_context(values: dict[str, Any] | None) -> list:
+        return []
+
+    def _capture_context() -> dict[str, str]:
+        return {}
+
+    def _clear_context(tokens: list) -> None:
+        return None
+
+    def _current_request_id() -> str:
+        return ""
+
+    def _to_error_response(exc: Exception, *, default_status: int = 400,
+                           safe_message: str | None = None) -> tuple[dict[str, Any], int]:
+        return {"message": safe_message or str(exc)}, default_status
+
+    def _redact(value: Any) -> Any:
+        return value
+
 
 from aigc_round_service import normalize_path
 from app_config import load_app_config, save_app_config
@@ -48,6 +82,11 @@ class ProgressState:
     source_path: str = ""
     completed: bool = False
     error: str | None = None
+    error_code: str = ""
+    error_stage: str = ""
+    error_retriable: bool = False
+    request_id: str = ""
+    context: dict[str, Any] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
     result: dict[str, Any] | None = None
     condition: threading.Condition = field(default_factory=threading.Condition)
@@ -63,8 +102,39 @@ def ensure_workspace_dirs() -> None:
     web_export_dir().mkdir(parents=True, exist_ok=True)
 
 
-def error_response(message: str, status: int = 400) -> tuple[Response, int]:
-    return jsonify({"message": message}), status
+def error_response(
+    message: str,
+    status: int = 400,
+    *,
+    code: str = "",
+    stage: str = "",
+    retriable: bool = False,
+    request_id: str = "",
+) -> tuple[Response, int]:
+    payload: dict[str, Any] = {"message": str(_redact(message))}
+    if code:
+        payload["code"] = code
+    if stage:
+        payload["stage"] = stage
+    if retriable:
+        payload["retriable"] = True
+    rid = request_id or _current_request_id()
+    if rid:
+        payload["requestId"] = rid
+    return jsonify(payload), status
+
+
+def error_from_exception(exc: Exception) -> tuple[Response, int]:
+    """统一错误出口：保留 message / 400，追加结构化字段。"""
+    payload, status = _to_error_response(exc, default_status=400)
+    if "message" not in payload:
+        payload["message"] = str(_redact(str(exc)))
+    rid = _current_request_id()
+    if rid:
+        payload.setdefault("requestId", rid)
+    return jsonify(payload), status
+
+
 def _is_within(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root.resolve())
@@ -126,18 +196,41 @@ def append_progress_event(run_id: str, event: dict[str, Any]) -> None:
         state.condition.notify_all()
 
 
-def finalize_progress(run_id: str, *, result: dict[str, Any] | None = None, error: str | None = None) -> None:
+def finalize_progress(
+    run_id: str,
+    *,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+    error_code: str = "",
+    error_stage: str = "",
+    error_retriable: bool = False,
+) -> None:
     state = RUN_STATES.get(run_id)
     if not state:
         return
     with state.condition:
         state.result = result
-        state.error = error
+        state.error = str(_redact(error)) if error else None
+        state.error_code = error_code
+        state.error_stage = error_stage
+        state.error_retriable = error_retriable
         state.completed = True
         state.condition.notify_all()
 
 
+def _error_fields(exc: Exception) -> tuple[str, str, bool]:
+    code = getattr(exc, "code", None)
+    stage = getattr(exc, "stage", None)
+    if isinstance(code, str) and isinstance(stage, str):
+        return code, stage, bool(getattr(exc, "retriable", False))
+    if isinstance(exc, ValueError):
+        return "invalid_argument", "validation", False
+    return "internal_error", "run", False
+
+
 def run_round_async(run_id: str, source_path: str, model_config: dict[str, Any], execution_options: dict[str, Any] | None) -> None:
+    state = RUN_STATES.get(run_id)
+    tokens = _bind_context(state.context if state else {})
     try:
         def capture_progress(event: dict[str, Any]) -> None:
             append_progress_event(run_id, event)
@@ -149,8 +242,21 @@ def run_round_async(run_id: str, source_path: str, model_config: dict[str, Any],
             execution_options=execution_options,
         )
         finalize_progress(run_id, result=result)
-    except Exception as exc:
-        finalize_progress(run_id, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 - 后台线程必须兜底
+        code, stage, retriable = _error_fields(exc)
+        logger.error(
+            "任务失败：run_id=%s code=%s stage=%s error=%s",
+            run_id, code, stage, _redact(str(exc)), exc_info=True,
+        )
+        finalize_progress(
+            run_id,
+            error=str(exc),
+            error_code=code,
+            error_stage=stage,
+            error_retriable=retriable,
+        )
+    finally:
+        _clear_context(tokens)
 
 
 def require_query_value(key: str) -> str:
@@ -164,7 +270,7 @@ def require_query_value(key: str) -> str:
 def validate_origin() -> tuple[Response, int] | None:
     origin = request.headers.get("Origin", "").strip()
     if origin and origin not in ALLOWED_WEB_ORIGINS:
-        return error_response("Origin not allowed.", 403)
+        return error_response("Origin not allowed.", 403, code="forbidden", stage="auth")
     return None
 
 
@@ -196,7 +302,7 @@ def post_model_config() -> tuple[Response, int] | Response:
         payload = request.get_json(silent=True) or {}
         return jsonify(save_app_config(payload))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/test-connection", methods=["POST"])
@@ -205,7 +311,7 @@ def post_test_connection() -> tuple[Response, int] | Response:
         payload = request.get_json(silent=True) or {}
         return jsonify(test_model_connection(payload))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/fetch-models", methods=["POST"])
@@ -214,7 +320,7 @@ def post_fetch_models() -> tuple[Response, int] | Response:
         payload = request.get_json(silent=True) or {}
         return jsonify(fetch_model_list_for_app(payload))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/upload-document", methods=["POST"])
@@ -240,7 +346,7 @@ def post_upload_document() -> tuple[Response, int] | Response:
             target_path = write_uploaded_file(filename, content)
         return jsonify(build_upload_response(target_path, conflict=False, reused=False)), 201
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/document-status", methods=["GET"])
@@ -250,7 +356,7 @@ def get_status() -> tuple[Response, int] | Response:
         source_path = require_managed_source_path(require_query_value("sourcePath"))
         return jsonify(get_document_status(source_path, prompt_profile=prompt_profile))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/document-history", methods=["GET"])
@@ -259,7 +365,7 @@ def get_history() -> tuple[Response, int] | Response:
         source_path = require_managed_source_path(require_query_value("sourcePath"))
         return jsonify(get_document_history(source_path))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/history-documents", methods=["GET"])
@@ -267,7 +373,7 @@ def get_history_list() -> tuple[Response, int] | Response:
     try:
         return jsonify(list_document_histories())
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/document-history", methods=["DELETE"])
@@ -286,7 +392,7 @@ def delete_history() -> tuple[Response, int] | Response:
                 return error_response("该文档仍在运行，请先停止任务并等待结束后再删除。", 409)
             return jsonify(delete_document_history(doc_id, from_round))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/read-output", methods=["GET"])
@@ -295,7 +401,7 @@ def get_read_output() -> tuple[Response, int] | Response:
         output_path = require_managed_output_path(require_query_value("outputPath"))
         return jsonify(read_output_text(output_path))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/read-output-preview", methods=["GET"])
@@ -305,7 +411,7 @@ def get_read_output_preview() -> tuple[Response, int] | Response:
         manifest_path = require_managed_output_path(require_query_value("manifestPath"))
         return jsonify(read_output_preview(output_path, manifest_path))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/read-progress-preview", methods=["GET"])
@@ -318,7 +424,7 @@ def get_read_progress_preview() -> tuple[Response, int] | Response:
         response.headers["Cache-Control"] = "no-store"
         return response
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/read-source-preview", methods=["GET"])
@@ -329,7 +435,7 @@ def get_read_source_preview() -> tuple[Response, int] | Response:
         prompt_profile = request.args.get("promptProfile", "cn")
         return jsonify(read_source_preview(input_path, manifest_path, prompt_profile))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/run-round", methods=["POST"])
@@ -347,7 +453,12 @@ def post_run_round() -> tuple[Response, int] | Response:
             if not Path(source_path).is_file():
                 raise ValueError("原始文件不存在，请重新上传文档。")
             run_id = uuid.uuid4().hex
-            RUN_STATES[run_id] = ProgressState(source_path=source_path)
+            context = _capture_context()
+            RUN_STATES[run_id] = ProgressState(
+                source_path=source_path,
+                request_id=str(context.get("requestId", "")),
+                context=context,
+            )
             worker = threading.Thread(
                 target=run_round_async,
                 args=(run_id, source_path, model_config, execution_options),
@@ -360,7 +471,7 @@ def post_run_round() -> tuple[Response, int] | Response:
                 raise
         return jsonify({"runId": run_id}), 202
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/request-stop", methods=["POST"])
@@ -371,7 +482,7 @@ def post_request_stop() -> tuple[Response, int] | Response:
         prompt_profile = str(payload.get("promptProfile", "cn") or "cn")
         return jsonify(request_stop_for_app(source_path, prompt_profile=prompt_profile))
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/export-round", methods=["GET"])
@@ -409,35 +520,50 @@ def get_export_round() -> tuple[Response, int] | Response:
             mimetype = "text/plain; charset=utf-8"
         return send_file(file_path, mimetype=mimetype, as_attachment=True, download_name=file_path.name)
     except Exception as exc:
-        return error_response(str(exc))
+        return error_from_exception(exc)
 
 
 @app.route("/api/run-round-events/<run_id>", methods=["GET"])
 def get_run_round_events(run_id: str) -> tuple[Response, int] | Response:
     state = RUN_STATES.get(run_id)
     if not state:
-        return error_response("Unknown run id.")
+        return error_response("Unknown run id.", code="not_found", stage="routing")
 
     def generate() -> Any:
         cursor = 0
-        while True:
-            with state.condition:
-                while cursor >= len(state.events) and not state.completed:
-                    state.condition.wait(timeout=1)
-                while cursor < len(state.events):
-                    event = state.events[cursor]
-                    payload = json.dumps(event, ensure_ascii=False)
-                    yield f"event: progress\ndata: {payload}\n\n"
-                    cursor += 1
-                if state.completed:
-                    if state.error:
-                        payload = json.dumps({"message": state.error}, ensure_ascii=False)
-                        yield f"event: error\ndata: {payload}\n\n"
-                    else:
-                        payload = json.dumps(state.result or {}, ensure_ascii=False)
-                        yield f"event: result\ndata: {payload}\n\n"
-                    RUN_STATES.pop(run_id, None)
-                    return
+        tokens = _bind_context(state.context)
+        try:
+            while True:
+                with state.condition:
+                    while cursor >= len(state.events) and not state.completed:
+                        state.condition.wait(timeout=1)
+                    while cursor < len(state.events):
+                        event = state.events[cursor]
+                        payload = json.dumps(event, ensure_ascii=False)
+                        yield f"event: progress\ndata: {payload}\n\n"
+                        cursor += 1
+                    if state.completed:
+                        if state.error:
+                            error_data: dict[str, Any] = {"message": state.error}
+                            if state.error_code:
+                                error_data["code"] = state.error_code
+                            if state.error_stage:
+                                error_data["stage"] = state.error_stage
+                            if state.error_retriable:
+                                error_data["retriable"] = True
+                            rid = state.request_id or str(state.context.get("requestId", ""))
+                            if rid:
+                                error_data["requestId"] = rid
+                            payload = json.dumps(error_data, ensure_ascii=False)
+                            yield f"event: error\ndata: {payload}\n\n"
+                        else:
+                            payload = json.dumps(state.result or {}, ensure_ascii=False)
+                            yield f"event: result\ndata: {payload}\n\n"
+                        return
+        finally:
+            # 客户端提前断开也必须回收，否则 RUN_STATES 会无限增长。
+            RUN_STATES.pop(run_id, None)
+            _clear_context(tokens)
 
     response = Response(stream_with_context(generate()), mimetype="text/event-stream")
     response.headers["Cache-Control"] = "no-cache"
@@ -446,7 +572,7 @@ def get_run_round_events(run_id: str) -> tuple[Response, int] | Response:
 
 @app.errorhandler(404)
 def not_found_api(_: Any) -> tuple[Response, int]:
-    return error_response("Unknown route", 404)
+    return error_response("Unknown route", 404, code="not_found", stage="routing")
 
 
 def main() -> None:

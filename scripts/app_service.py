@@ -732,6 +732,10 @@ def run_round_for_app(
                     temperature=temperature,
                 )
             except Exception as exc:
+                # LLMClientError 等带 code/stage/retriable 的异常必须原样上抛，
+                # 否则上层只能拿到字符串，无法区分可重试错误与配置错误。
+                if getattr(exc, "code", None) and getattr(exc, "stage", None):
+                    raise
                 raise RuntimeError(f"LLM request failed for chunk {chunk_id}: {exc}") from exc
 
     requested_apply_mode = str((execution_options or {}).get("applyMode", "") or "").strip()
