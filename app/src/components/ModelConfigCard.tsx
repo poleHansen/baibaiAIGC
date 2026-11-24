@@ -40,6 +40,9 @@ export function ModelConfigCard({ value, busy, platformMode = false, availableMo
           placeholder="https://your-endpoint/v1"
           disabled={platformMode}
         />
+        <span style={{ display: "block", marginTop: 6, fontSize: 12, color: "#6b7280" }}>
+          接口地址记得加 <code>/v1</code> 结尾，例如 <code>https://api.example.com/v1</code>。
+        </span>
       </label>
       <label className="field">
         <span>API Key</span>
