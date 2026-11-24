@@ -783,6 +783,14 @@ def _collect_document_file_paths(doc_id: str, entry: Dict[str, Any]) -> set[Path
     for directory in (finish_dir() / "intermediate", finish_dir() / "web_exports"):
         if directory.is_dir():
             paths.update(path.resolve() for path in directory.iterdir() if pattern.fullmatch(path.name))
+    # 同一来源在 origin / intermediate / exports 下的裸文件（同 stem）也要清掉，
+    # 避免记录里没写全路径时留下原始上传或解析产物。
+    for directory in (origin_dir(), finish_dir() / "intermediate", finish_dir() / "web_exports"):
+        if not directory.is_dir():
+            continue
+        for path in directory.rglob("*"):
+            if path.is_file() and path.stem == source.stem:
+                paths.add(path.resolve())
     return paths
 
 
@@ -794,19 +802,41 @@ def delete_document(doc_id: str) -> Dict[str, Any]:
     if not isinstance(doc_entry, dict):
         raise ValueError(f"Document record not found: {normalized_doc_id}")
     source = _record_path_to_absolute(str(doc_entry.get("origin_path") or normalized_doc_id))
+
+    # 同一份原始文件可能留下多条别名记录（例如旧格式路径与归一化路径并存）。
+    # 整篇删除时把这些别名一起删掉，否则它们会让原始/解析文件因“仍被引用”而留下。
+    alias_ids = {normalized_doc_id}
+    for other_id, entry in records.items():
+        if other_id == normalized_doc_id or not isinstance(entry, dict):
+            continue
+        other_source = _record_path_to_absolute(str(entry.get("origin_path") or other_id))
+        if source is not None and other_source == source:
+            alias_ids.add(other_id)
+
     retained_paths: set[Path] = set()
     for other_id, entry in records.items():
-        if other_id != normalized_doc_id and isinstance(entry, dict):
+        if other_id not in alias_ids and isinstance(entry, dict):
             retained_paths.update(_collect_document_file_paths(other_id, entry))
+
+    candidates: set[Path] = set()
+    for alias_id in alias_ids:
+        alias_entry = records.get(alias_id)
+        if isinstance(alias_entry, dict):
+            candidates.update(_collect_document_file_paths(alias_id, alias_entry))
+
     removed_files = []
-    for path in sorted(_collect_document_file_paths(normalized_doc_id, doc_entry) - retained_paths):
-        is_source = path == source and path.is_relative_to(origin_dir().resolve())
-        if not is_source and not _is_safe_generated_artifact(path):
+    for path in sorted(candidates - retained_paths):
+        in_origin = path.is_relative_to(origin_dir().resolve())
+        is_source = path == source and in_origin
+        same_stem_source = in_origin and source is not None and path.stem == source.stem
+        if not (is_source or same_stem_source or _is_safe_generated_artifact(path)):
             continue
         if path.is_file():
             path.unlink()
             removed_files.append(path.relative_to(get_data_root()).as_posix())
-    records.pop(normalized_doc_id)
+
+    for alias_id in alias_ids:
+        records.pop(alias_id, None)
     save_records(records)
     rounds = doc_entry.get("rounds") if isinstance(doc_entry.get("rounds"), list) else []
     return {
