@@ -4,6 +4,8 @@
    <img src="e7d4bdd094205b9e244508aca83e4d3a.png" alt="图片" width="300">
 </div>
 
+## AI检测技术更新迭代比较快，大家理性使用，不能保证我这个方法现在还完全有效
+
 在线体验地址：https://baibaiaigc.xyz/
 
 
